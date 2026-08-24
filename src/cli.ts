@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
 
+import { changedOnlyReport } from "./changed.js";
 import {
   type ConfigOverrides,
   DEFAULT_CONFIG_YAML,
@@ -36,10 +37,16 @@ interface CheckCliOptions {
   readonly agent?: readonly string[];
   readonly header?: readonly string[];
   readonly sitemap?: readonly string[];
+  readonly urls?: readonly string[];
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
   readonly query?: "drop" | "keep";
   readonly ignoreRobots?: boolean;
+  readonly rendered?: boolean;
+  readonly renderConcurrency?: number;
+  readonly renderTimeout?: number;
+  readonly renderSettle?: number;
+  readonly changedOnly?: string;
   readonly root?: string;
   readonly buildDirectory?: string;
 }
@@ -73,6 +80,10 @@ function duration(value: string): number {
     throw new InvalidArgumentError("Timeout must be greater than zero.");
   }
   return result;
+}
+
+function settleDuration(value: string): number {
+  return /^0(?:ms|s|m)?$/i.test(value.trim()) ? 0 : duration(value);
 }
 
 function bytes(value: string): number {
@@ -112,10 +123,16 @@ function addCheckOptions(command: Command): Command {
     .option("--agent <name-or-user-agent>", "repeat for bot-delivery comparison", collect)
     .option("--header <name:value>", "repeat for preview credentials", collect)
     .option("--sitemap <url>", "repeat to override sitemap discovery", collect)
+    .option("--urls <file>", "repeat for URL-list files; use - for stdin", collect)
     .option("--include <pattern>", "repeat to include matching paths", collect)
     .option("--exclude <pattern>", "repeat to exclude matching paths", collect)
     .addOption(new Option("--query <policy>", "query-string handling").choices(["drop", "keep"]))
-    .option("--ignore-robots", "fetch routes even when robots.txt disallows them");
+    .option("--ignore-robots", "fetch routes even when robots.txt disallows them")
+    .option("--rendered", "compare server HTML with a Playwright-rendered DOM")
+    .option("--render-concurrency <count>", "concurrent browser pages", positiveInteger)
+    .option("--render-timeout <duration>", "browser navigation timeout", duration)
+    .option("--render-settle <duration>", "wait after DOMContentLoaded", settleDuration)
+    .option("--changed-only <baseline.json>", "report only new or worsened findings");
 }
 
 function overrides(baseUrl: string | undefined, options: CheckCliOptions): ConfigOverrides {
@@ -130,10 +147,17 @@ function overrides(baseUrl: string | undefined, options: CheckCliOptions): Confi
     ...(options.agent === undefined ? {} : { agents: options.agent }),
     ...(options.header === undefined ? {} : { headers: parseHeaderOptions(options.header) }),
     ...(options.sitemap === undefined ? {} : { sitemaps: options.sitemap }),
+    ...(options.urls === undefined ? {} : { urlFiles: options.urls }),
     ...(options.include === undefined ? {} : { include: options.include }),
     ...(options.exclude === undefined ? {} : { exclude: options.exclude }),
     ...(options.query === undefined ? {} : { queryPolicy: options.query }),
     ...(options.ignoreRobots === true ? { respectRobots: false } : {}),
+    ...(options.rendered === true ? { rendered: true } : {}),
+    ...(options.renderConcurrency === undefined
+      ? {}
+      : { renderedConcurrency: options.renderConcurrency }),
+    ...(options.renderTimeout === undefined ? {} : { renderedTimeoutMs: options.renderTimeout }),
+    ...(options.renderSettle === undefined ? {} : { renderedSettleMs: options.renderSettle }),
     ...(options.root === undefined ? {} : { nextRoot: options.root }),
     ...(options.buildDirectory === undefined ? {} : { buildDirectory: options.buildDirectory }),
   };
@@ -164,10 +188,14 @@ async function executeCheck(
     ...(options.config === undefined ? {} : { configPath: options.config }),
     overrides: {
       ...overrides(baseUrl, options),
-      ...(nextMode && options.root === undefined ? { nextRoot: "." } : {}),
+      ...(nextMode ? { enableNext: true } : {}),
     },
   });
-  const report = await runRouteLint(config);
+  const completeReport = await runRouteLint(config);
+  const report =
+    options.changedOnly === undefined
+      ? completeReport
+      : changedOnlyReport(completeReport, await readRouteLintReport(options.changedOnly));
   const text = renderReport(report, options.format, {
     color: options.color && options.output === undefined && process.stdout.isTTY === true,
   });
@@ -205,7 +233,7 @@ export function createProgram(): Command {
       .command("next")
       .description("add Next.js build-manifest routes to the live crawl")
       .argument("[base-url]", "running Next.js site URL; optional when config supplies baseUrl")
-      .option("--root <directory>", "Next.js project root", ".")
+      .option("--root <directory>", "Next.js project root")
       .option("--build-directory <directory>", "build directory under the project root", ".next"),
   ).action(async (baseUrl: string | undefined, options: CheckCliOptions) => {
     await executeCheck(baseUrl, options, true);

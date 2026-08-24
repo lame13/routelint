@@ -90,6 +90,15 @@ function routeStatuses(route: RouteNode): string {
   return statuses.length === 0 ? "—" : statuses.join(" / ");
 }
 
+function renderedEvidence(route: RouteNode): string {
+  if (route.rendered === undefined) return "Not requested";
+  if (route.rendered.completion !== "complete") return route.rendered.completion;
+  const characters = route.rendered.content?.characters;
+  return characters === undefined
+    ? "Complete"
+    : `Complete · ${characters.toLocaleString("en-US")} text characters`;
+}
+
 function indexingSignal(route: RouteNode): string {
   if (route.snapshots.length === 0) return "Unknown — not fetched";
   const values = route.snapshots.map((snapshot) => ({
@@ -252,6 +261,7 @@ function renderRouteRows(
         <td>${escapeHtml(depthLabel(route.depth))}</td>
         <td>${escapeHtml(routeStatuses(route))}</td>
         <td><span class="evidence-${evidence.complete ? "complete" : "incomplete"}">${escapeHtml(evidence.label)}</span></td>
+        <td>${escapeHtml(renderedEvidence(route))}</td>
         <td>${escapeHtml(indexingSignal(route))}</td>
         <td>${escapeHtml(route.inbound.length)} / ${escapeHtml(route.outbound.length)}</td>
         <td>${findingLabel}</td>
@@ -345,6 +355,52 @@ function incompleteBanner(report: RouteLintReport): string {
   </aside>`;
 }
 
+function comparisonBanner(report: RouteLintReport): string {
+  const comparison = report.comparison;
+  if (comparison === undefined) return "";
+  return `<aside class="notice notice-info" aria-labelledby="comparison-heading">
+    <h2 id="comparison-heading">Changed-only report</h2>
+    <p>Findings below are limited to ${escapeHtml(comparison.newFindings)} new and ${escapeHtml(comparison.worsenedFindings)} worsened findings compared with ${escapeHtml(comparison.baselineGeneratedAt)}. ${escapeHtml(comparison.resolvedFindings)} resolved and ${escapeHtml(comparison.unchangedFindings)} unchanged findings are omitted.</p>
+  </aside>`;
+}
+
+function inputWarningBanner(report: RouteLintReport): string {
+  const warnings = report.inputs?.warnings ?? [];
+  if (warnings.length === 0) return "";
+  return `<aside class="notice" aria-labelledby="input-warning-heading">
+    <h2 id="input-warning-heading">URL-list warnings</h2>
+    <ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>
+  </aside>`;
+}
+
+function renderAgentComparison(findings: readonly Finding[], configuredAgents: number): string {
+  const differences = findings.filter((finding) => finding.code.startsWith("agent-"));
+  if (configuredAgents < 2 && differences.length === 0) return "";
+  const content =
+    differences.length === 0
+      ? '<div class="empty-state">No response differences were found between configured agents.</div>'
+      : `<div class="table-scroll"><table>
+          <thead><tr><th scope="col">Severity</th><th scope="col">Route</th><th scope="col">Difference</th><th scope="col">Agents and evidence</th></tr></thead>
+          <tbody>${differences
+            .slice()
+            .sort(compareFindings)
+            .map(
+              (finding) => `<tr>
+                <td>${severityBadge(finding.severity)}</td>
+                <th scope="row"><code class="url-value">${escapeHtml(finding.url ?? "Site-wide")}</code></th>
+                <td><code>${escapeHtml(finding.code)}</code><p class="finding-message">${escapeHtml(finding.message)}</p></td>
+                <td>${evidenceMarkup(finding)}</td>
+              </tr>`,
+            )
+            .join("\n")}</tbody>
+        </table></div>`;
+  return `<section aria-labelledby="agents-heading">
+    <h2 id="agents-heading">Agent response differences</h2>
+    <p class="section-note">These checks compare status, redirects, content type, title, description, canonical, and robots directives in raw server responses.</p>
+    ${content}
+  </section>`;
+}
+
 const STYLES = `
 :root {
   color-scheme: light;
@@ -387,6 +443,8 @@ h2 { margin: 0 0 1rem; font-size: clamp(1.35rem, 3vw, 2rem); }
 main { padding-block: 2rem 4rem; }
 section { margin-top: 3rem; }
 .notice { padding: 1rem 1.15rem; border: 2px solid var(--warning); background: var(--warning-soft); }
+.notice + .notice { margin-top: 0.8rem; }
+.notice-info { border-color: var(--info); background: var(--info-soft); }
 .notice h2 { margin: 0 0 0.35rem; font-size: 1.05rem; letter-spacing: 0; }
 .notice p { margin: 0.25rem 0 0; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--strong-line); border-left: 1px solid var(--strong-line); }
@@ -526,10 +584,11 @@ export function renderHtmlReport(report: RouteLintReport): string {
     report.routes.length === 0
       ? `<div class="empty-state">No routes were collected.</div>`
       : `<div class="table-scroll"><table>
-          <thead><tr><th scope="col">Route</th><th scope="col">Depth</th><th scope="col">HTTP</th><th scope="col">Evidence</th><th scope="col">Indexing signal</th><th scope="col">Links in / out</th><th scope="col">Findings</th></tr></thead>
+          <thead><tr><th scope="col">Route</th><th scope="col">Depth</th><th scope="col">HTTP</th><th scope="col">Server evidence</th><th scope="col">Rendered evidence</th><th scope="col">Indexing signal</th><th scope="col">Links in / out</th><th scope="col">Findings</th></tr></thead>
           <tbody>${routeRows}</tbody>
         </table></div>`;
   const safeTitleUrl = escapeHtml(report.baseUrl);
+  const agentComparison = renderAgentComparison(report.findings, report.config.agents.length);
 
   return `<!doctype html>
 <html lang="en" class="no-js">
@@ -553,7 +612,9 @@ export function renderHtmlReport(report: RouteLintReport): string {
     </div>
   </header>
   <main id="main-content">
+    ${comparisonBanner(report)}
     ${incompleteBanner(report)}
+    ${inputWarningBanner(report)}
     <section aria-labelledby="summary-heading">
       <h2 id="summary-heading">Summary</h2>
       <dl class="summary-grid">
@@ -585,6 +646,8 @@ export function renderHtmlReport(report: RouteLintReport): string {
       ${routeContent}
     </section>
 
+    ${agentComparison}
+
     <section aria-labelledby="findings-heading">
       <h2 id="findings-heading">Findings</h2>
       ${
@@ -608,6 +671,10 @@ export function renderHtmlReport(report: RouteLintReport): string {
         <div><dt>Agents</dt><dd>${escapeHtml(report.config.agents.join(", ") || "None")}</dd></div>
         <div><dt>Robots respected</dt><dd>${report.config.respectRobots ? "Yes" : "No"}</dd></div>
         <div><dt>Query policy</dt><dd>${escapeHtml(report.config.queryPolicy)}</dd></div>
+        <div><dt>Browser rendering</dt><dd>${report.config.rendered === true ? "Enabled" : "Disabled"}</dd></div>
+        <div><dt>URL-list files</dt><dd>${escapeHtml(report.inputs?.urlListFiles ?? report.config.urlListFiles ?? 0)}</dd></div>
+        <div><dt>URL-list routes</dt><dd>${escapeHtml(report.inputs?.urlListUrls ?? 0)}</dd></div>
+        <div><dt>Path rule scopes</dt><dd>${escapeHtml(report.config.audit?.paths?.length ?? 0)}</dd></div>
         <div><dt>Schema version</dt><dd>${escapeHtml(report.schemaVersion)}</dd></div>
       </dl>
     </section>

@@ -2,6 +2,26 @@
 
 All notable changes are documented here. This project follows semantic versioning.
 
+## 0.2.0 - 2026-08-24
+
+### Added
+
+- Optional Playwright Chromium pass that compares raw SSR evidence with the rendered DOM while injecting configured headers only into audited-origin requests.
+- Body-text evidence with word/character counts, SHA-256, and SimHash; reports do not retain page text.
+- Empty SSR shell, client-only content, rendered-only SEO signal, soft-404, possible-soft-404, and duplicate SSR body checks.
+- Explicit URL-list files and stdin input with source-line diagnostics, same-origin enforcement, size limits, and stable de-duplication.
+- Global and path-scoped requirement/severity configuration, including disabling finding codes.
+- `--changed-only` output for new or worsened findings against a schema-validated baseline.
+- Dedicated agent-response comparison in HTML reports and clearer collection scope in terminal/HTML output.
+- Representative frozen Next.js 16 App Router manifests and Astro SSR output fixtures.
+
+### Changed
+
+- JSON report schema is now version 2. The report reader and diff command remain compatible with schema 1.
+- Browser rendering is an optional peer dependency; default installs remain raw-HTTP only and do not download Chromium.
+- Runtime and development dependencies use the updated versions supplied in the Dependabot-clean 0.1.0 baseline.
+- CI remains verification-only. npm publishing is still an interactive local operation protected by account and package 2FA.
+
 ## 0.1.0 - 2026-08-22
 
 ### Added

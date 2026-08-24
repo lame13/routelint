@@ -1,0 +1,15 @@
+{
+  "/(marketing)/page": "/",
+  "/(marketing)/pricing/page": "/pricing",
+  "/account/page": "/account",
+  "/blog/[slug]/page": "/blog/[slug]",
+  "/docs/[[...parts]]/page": "/docs/[[...parts]]",
+  "/products/[slug]/page": "/products/[slug]",
+  "/@modal/(.)photo/[id]/page": "/photo/[id]",
+  "/api/revalidate/route": "/api/revalidate",
+  "/feed.xml/route": "/feed.xml",
+  "/favicon.ico/route": "/favicon.ico",
+  "/opengraph-image/route": "/opengraph-image",
+  "/robots.txt/route": "/robots.txt",
+  "/sitemap.xml/route": "/sitemap.xml"
+}

@@ -125,6 +125,13 @@ export function renderTerminalReport(
       color,
     ),
   );
+  if (report.comparison !== undefined) {
+    const comparison = report.comparison;
+    lines.push(
+      `Changed only: ${comparison.newFindings} new, ${comparison.worsenedFindings} worsened, ${comparison.resolvedFindings} resolved, ${comparison.unchangedFindings} unchanged.`,
+    );
+    lines.push(`Baseline: ${terminalText(comparison.baselineGeneratedAt)}`);
+  }
   lines.push("");
   lines.push(
     [
@@ -135,6 +142,26 @@ export function renderTerminalReport(
       `max depth ${report.summary.maxDepth.toLocaleString("en-US")}`,
     ].join("  |  "),
   );
+  const agentDifferences = report.findings.filter((finding) => finding.code.startsWith("agent-"));
+  if (report.config.agents.length > 1) {
+    lines.push(
+      `${agentDifferences.length.toLocaleString("en-US")} agent response differences across ${new Set(agentDifferences.map((finding) => finding.url).filter(Boolean)).size.toLocaleString("en-US")} routes`,
+    );
+  }
+  if (report.config.rendered === true) {
+    const completed = report.routes.filter(
+      (route) => route.rendered?.completion === "complete",
+    ).length;
+    lines.push(`Rendered comparison: ${completed}/${report.routes.length} routes complete`);
+  }
+  if ((report.inputs?.urlListFiles ?? 0) > 0) {
+    lines.push(
+      `URL lists: ${report.inputs?.urlListFiles ?? 0} files, ${report.inputs?.urlListUrls ?? 0} accepted routes`,
+    );
+    for (const warning of report.inputs?.warnings ?? []) {
+      lines.push(`  URL-list warning: ${terminalText(warning)}`);
+    }
+  }
   lines.push(
     [
       paint(`${report.summary.errors} errors`, ANSI.red, color),

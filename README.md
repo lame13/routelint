@@ -4,9 +4,9 @@
 [![npm](https://img.shields.io/npm/v/routelint)](https://www.npmjs.com/package/routelint)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-RouteLint finds technical-SEO mistakes that only become obvious when you compare a site's routes with each other: broken internal links, sitemap URLs that redirect or return `noindex`, canonicals pointing at bad targets, missing hreflang return links, orphan pages, and Next.js build routes that do not survive deployment.
+RouteLint finds technical-SEO mistakes that become obvious only when routes are compared as a system: broken internal links, soft 404s, empty SSR shells, duplicate server content, sitemap conflicts, unhealthy canonical targets, missing hreflang return links, orphan pages, and Next.js build routes that do not survive deployment.
 
-It reads the raw HTTP response. It does not run client JavaScript and it does not invent an SEO score.
+Raw server responses remain the primary evidence. An optional Playwright pass compares that evidence with the browser-rendered DOM. RouteLint does not invent an SEO score.
 
 ```bash
 npx routelint check https://example.com
@@ -16,14 +16,15 @@ npx routelint check https://example.com
 
 | Area | Evidence and checks |
 | --- | --- |
-| Route discovery | Seeds, recursive sitemap indexes, `robots.txt`, crawlable internal links, and optional Next.js build manifests |
+| Route discovery | Seeds, URL-list files or stdin, recursive sitemap indexes, `robots.txt`, crawlable internal links, and optional Next.js build manifests |
 | HTTP delivery | Status, explicit redirect chain, final URL, content type, response size, timeouts, and bot-specific responses |
-| Server-rendered HTML | Title, description, canonical, robots/googlebot/bingbot directives, H1, language, links, and hreflang |
+| Server-rendered HTML | Title, description, canonical, robots/googlebot/bingbot directives, H1, language, links, hreflang, body-text fingerprints, empty shells, soft 404s, and duplicate bodies |
+| Rendered comparison | Optional browser evidence for content and SEO signals that appear only after JavaScript runs |
 | Link graph | Broken and redirecting links, links to `noindex`, orphans, dead ends, and crawl depth |
 | Indexing consistency | Sitemap redirects/errors/noindex, indexable routes missing from sitemaps, robots conflicts, canonical target health, and duplicate canonical targets |
 | International SEO | Invalid or duplicate hreflang, missing targets, noindex targets, and missing reciprocal links |
 | Next.js | Concrete App Router and Pages Router paths, prerendered and ISR routes, redirects, dynamic route samples, `basePath`, and unresolved patterns |
-| Regression checks | Added/removed routes plus status, final URL, title, canonical, robots, indexability, render-mode, and finding changes |
+| Regression checks | Full report diffs, plus changed-only audit output containing only new or worsened findings |
 
 Every crawl is bounded by page, depth, response-size, redirect, timeout, and concurrency limits. Off-origin pages are never added to the crawl graph.
 
@@ -85,6 +86,35 @@ npx routelint check https://example.com \
 
 The checks depend on HTTP and HTML, not a framework integration.
 
+### Check an explicit route inventory
+
+Use one URL or path per line. Blank lines and `#` comments are ignored. Invalid lines fail the run; off-origin lines are excluded and reported.
+
+```text
+# routes.txt
+/
+/pricing
+/docs/getting-started
+https://example.com/legal
+```
+
+```bash
+npx routelint check https://example.com --urls routes.txt
+cat routes.txt | npx routelint check https://example.com --urls -
+```
+
+### Compare SSR with the rendered DOM
+
+Browser comparison is opt-in. Playwright is an optional peer so normal installs do not download a browser.
+
+```bash
+npm install --save-dev routelint playwright
+npx playwright install chromium
+npx routelint check https://example.com --rendered
+```
+
+Configured preview headers are injected only into audited-origin browser requests. Cross-origin requests do not receive them, and rendered contexts block service workers.
+
 ## Commands
 
 ```text
@@ -114,6 +144,12 @@ npx routelint check https://example.com \
 # Save a baseline, then compare a later deployment
 npx routelint check https://example.com --format json -o baseline.json
 npx routelint diff baseline.json current.json --fail-on warning
+
+# On later CI runs, emit and fail only on new or worsened findings
+npx routelint check https://example.com \
+  --changed-only baseline.json \
+  --format sarif \
+  --output routelint.sarif
 ```
 
 ## Configuration
@@ -128,6 +164,7 @@ npx routelint init
 baseUrl: https://example.com
 seeds:
   - /
+urls: []
 sitemaps: auto
 agents:
   - routelint
@@ -153,6 +190,20 @@ audit:
   requireH1: true
   requireSitemapCoverage: true
   maxDepth: 4
+  severities:
+    noindex: info
+  paths:
+    - include:
+        - /docs/**
+      requireDescription: false
+      severities:
+        missing-h1: info
+
+rendered:
+  enabled: false
+  concurrency: 2
+  timeoutMs: 20000
+  settleMs: 250
 ```
 
 Command-line values override the config. JSON config is supported too.
@@ -200,14 +251,15 @@ A failed request and an unchecked request are different states. If a page budget
 
 RouteLint deliberately does not:
 
-- execute JavaScript or test hydration;
+- claim browser equivalence unless `--rendered` was enabled and the capture completed;
+- diagnose hydration errors or user interactions;
 - calculate Core Web Vitals;
 - submit URLs to search engines;
 - crawl external links by default;
 - claim that an unobserved dynamic route exists;
 - replace a full authenticated browser test or a search-engine index report.
 
-See [docs/RULES.md](docs/RULES.md) for finding codes and [docs/NEXT.md](docs/NEXT.md) for Next.js discovery details.
+See [docs/RULES.md](docs/RULES.md) for finding codes, [docs/RENDERED.md](docs/RENDERED.md) for browser evidence, [docs/URL_LISTS.md](docs/URL_LISTS.md) for explicit inventories, and [docs/NEXT.md](docs/NEXT.md) for Next.js discovery details.
 
 ## Programmatic API
 

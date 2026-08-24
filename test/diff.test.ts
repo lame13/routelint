@@ -136,6 +136,90 @@ describe("report validation", () => {
     expect(parseRouteLintReport(value)).toBe(value);
   });
 
+  it("round-trips complete schema-v2 evidence and comparison metadata", () => {
+    const content = {
+      characters: 128,
+      words: 24,
+      sha256: "a".repeat(64),
+      simhash: "b".repeat(16),
+    };
+    const snapshot = page("/listed", { content });
+    const listedRoute = {
+      ...route("/listed", snapshot),
+      sources: [{ kind: "url-list" as const, from: "targets.txt", detail: "line 4" }],
+      rendered: {
+        requestedUrl: absolute("/listed"),
+        finalUrl: absolute("/listed"),
+        status: 200,
+        completion: "complete" as const,
+        signals: snapshot.signals,
+        content,
+        htmlBytes: 512,
+        durationMs: 18,
+      },
+    };
+    const value = {
+      ...report([listedRoute], [], "2026-08-24T00:00:00.000Z"),
+      schemaVersion: "2",
+      toolVersion: "0.2.0",
+      config: {
+        maxPages: 250,
+        maxDepth: 8,
+        agents: ["routelint", "browser"],
+        respectRobots: true,
+        queryPolicy: "keep" as const,
+        seeds: [`${origin}/`, `${origin}/products`],
+        sitemapMode: "explicit" as const,
+        sitemapUrls: [`${origin}/sitemap.xml`],
+        include: ["/products/**"],
+        exclude: ["/products/drafts/**"],
+        timeoutMs: 12_000,
+        maxBytes: 1_000_000,
+        maxRedirects: 4,
+        rendered: true,
+        renderedConcurrency: 2,
+        renderedTimeoutMs: 20_000,
+        renderedSettleMs: 250,
+        headerNames: ["authorization", "x-preview-key"],
+        urlListFiles: 1,
+        audit: {
+          requireTitle: true,
+          requireDescription: true,
+          requireCanonical: true,
+          requireH1: true,
+          requireSitemapCoverage: false,
+          maxDepth: 6,
+          severities: { "missing-title": "error" as const },
+          paths: [
+            {
+              include: ["/products/**"],
+              exclude: ["/products/drafts/**"],
+              requireDescription: false,
+              maxDepth: 3,
+              severities: { "missing-canonical": "warning" as const },
+            },
+          ],
+        },
+      },
+      inputs: {
+        urlListFiles: 1,
+        urlListUrls: 1,
+        warnings: ["targets.txt: ignored one off-origin URL"],
+      },
+      comparison: {
+        mode: "changed-only" as const,
+        baselineGeneratedAt: "2026-08-20T00:00:00.000Z",
+        newFindings: 2,
+        worsenedFindings: 1,
+        resolvedFindings: 3,
+        unchangedFindings: 5,
+      },
+    } satisfies RouteLintReport;
+    const roundTripped: unknown = JSON.parse(JSON.stringify(value));
+
+    expect(parseRouteLintReport(roundTripped)).toEqual(value);
+  });
+
   it("validates and preserves robots availability while accepting legacy reports", () => {
     const unavailable = {
       ...report(),
@@ -167,7 +251,7 @@ describe("report validation", () => {
 
   it.each([
     [null, "report"],
-    [{ ...report(), schemaVersion: "2" }, "schemaVersion"],
+    [{ ...report(), schemaVersion: "3" }, "schemaVersion"],
     [
       (() => {
         const { summary: _summary, ...missingSummary } = report();
@@ -187,6 +271,13 @@ describe("report validation", () => {
         ...report([], [{ code: "bad", severity: "urgent" as "error", message: "Bad" }]),
       },
       "findings.0.severity",
+    ],
+    [
+      {
+        ...report(),
+        config: { ...report().config, timeoutMs: 0 },
+      },
+      "config.timeoutMs",
     ],
   ])("rejects malformed report data at %s", (value, expectedPath) => {
     expect(() => parseRouteLintReport(value)).toThrow(expectedPath);

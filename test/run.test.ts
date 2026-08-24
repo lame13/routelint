@@ -1,12 +1,23 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type RequestListener, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runRouteLint } from "../src/run.js";
-import type { RouteLintConfig } from "../src/types.js";
+import type { RenderedPageSnapshot, RouteLintConfig } from "../src/types.js";
+
+const captureRenderedPagesMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../src/rendered.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/rendered.js")>()),
+  captureRenderedPages: captureRenderedPagesMock,
+}));
 
 const servers: Server[] = [];
+const temporaryDirectories: string[] = [];
 const agent = {
   key: "routelint",
   label: "RouteLint",
@@ -14,6 +25,7 @@ const agent = {
 } as const;
 
 afterEach(async () => {
+  captureRenderedPagesMock.mockReset();
   await Promise.all(
     servers.splice(0).map(
       (server) =>
@@ -22,6 +34,11 @@ afterEach(async () => {
           server.closeAllConnections();
         }),
     ),
+  );
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -127,8 +144,8 @@ describe("runRouteLint", () => {
     const findingCodes = report.findings.map((finding) => finding.code);
 
     expect(report).toMatchObject({
-      schemaVersion: "1",
-      toolVersion: "0.1.0",
+      schemaVersion: "2",
+      toolVersion: "0.2.0",
       baseUrl: `${origin}/`,
       truncated: false,
       config: {
@@ -137,6 +154,15 @@ describe("runRouteLint", () => {
         agents: ["routelint"],
         respectRobots: true,
         queryPolicy: "drop",
+        seeds: [`${origin}/`],
+        sitemapMode: "auto",
+        sitemapUrls: [],
+        include: [],
+        exclude: [],
+        timeoutMs: 2_000,
+        maxBytes: 100_000,
+        maxRedirects: 3,
+        headerNames: ["x-preview-key"],
       },
     });
     expect(report.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -207,6 +233,124 @@ describe("runRouteLint", () => {
     const ignored = await runRouteLint({ ...respectedConfig, respectRobots: false });
     expect(ignored.routes[0]?.snapshots[0]?.completion).toBe("complete");
     expect(requestedPaths.filter((path) => path === "/")).toHaveLength(1);
+  });
+
+  it("adds URL-list routes to the crawl and records rejected off-origin entries", async () => {
+    let origin = "";
+    origin = await listen((request, response) => {
+      if (request.url === "/robots.txt") {
+        response.writeHead(404).end();
+        return;
+      }
+      response
+        .writeHead(200, { "content-type": "text/html" })
+        .end(html(origin, request.url ?? "/"));
+    });
+    const directory = await mkdtemp(join(tmpdir(), "routelint-run-"));
+    temporaryDirectories.push(directory);
+    const list = join(directory, "targets.txt");
+    await writeFile(list, "/listed\nhttps://outside.test/rejected\n", "utf8");
+
+    const report = await runRouteLint({
+      ...config(`${origin}/`),
+      sitemaps: [],
+      urlFiles: [list],
+    });
+
+    expect(report.routes.map((route) => route.url)).toContain(`${origin}/listed`);
+    expect(report.routes.find((route) => route.url === `${origin}/listed`)?.sources).toContainEqual(
+      { kind: "url-list", from: "targets.txt", detail: "line 1" },
+    );
+    expect(report.inputs).toMatchObject({ urlListFiles: 1, urlListUrls: 1 });
+    expect(report.inputs?.warnings[0]).toContain("outside");
+    expect(JSON.stringify(report)).not.toContain(directory);
+  });
+
+  it("renders only complete direct 2xx HTML routes and attaches the evidence", async () => {
+    let origin = "";
+    origin = await listen((request, response) => {
+      const path = request.url ?? "/";
+      if (path === "/robots.txt") {
+        response.writeHead(404).end();
+        return;
+      }
+      if (path === "/") {
+        response
+          .writeHead(200, { "content-type": "text/html" })
+          .end(
+            html(
+              origin,
+              "/",
+              '<a href="/eligible">Eligible</a><a href="/data">Data</a>' +
+                '<a href="/old">Old</a><a href="/gone">Gone</a>',
+            ),
+          );
+        return;
+      }
+      if (path === "/eligible") {
+        response.writeHead(200, { "content-type": "text/html" }).end(html(origin, path));
+        return;
+      }
+      if (path === "/data") {
+        response.writeHead(200, { "content-type": "application/json" }).end("{}");
+        return;
+      }
+      if (path === "/old") {
+        response.writeHead(302, { location: "/eligible" }).end();
+        return;
+      }
+      response.writeHead(404, { "content-type": "text/html" }).end(html(origin, path));
+    });
+    captureRenderedPagesMock.mockImplementation(
+      async (urls: readonly string[]): Promise<readonly RenderedPageSnapshot[]> =>
+        urls.map((url) => ({
+          requestedUrl: url,
+          finalUrl: url,
+          status: 200,
+          completion: "complete",
+          signals: {
+            titles: [{ value: `Rendered ${new URL(url).pathname}`, location: "head" }],
+            descriptions: [],
+            canonicals: [],
+            robots: [],
+            h1s: [],
+            links: [],
+            hreflangs: [],
+          },
+          htmlBytes: 200,
+          durationMs: 5,
+        })),
+    );
+
+    const report = await runRouteLint({
+      ...config(`${origin}/`),
+      sitemaps: [],
+      rendered: { enabled: true, concurrency: 2, timeoutMs: 1_000, settleMs: 0 },
+    });
+
+    expect(captureRenderedPagesMock).toHaveBeenCalledOnce();
+    expect(captureRenderedPagesMock.mock.calls[0]?.[0]).toEqual([
+      `${origin}/`,
+      `${origin}/eligible`,
+    ]);
+    expect(captureRenderedPagesMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: { "x-preview-key": "local-test-secret" },
+      maxBytes: 100_000,
+      concurrency: 2,
+      timeoutMs: 1_000,
+      settleMs: 0,
+    });
+    expect(report.routes.find((item) => item.url === `${origin}/`)?.rendered).toBeDefined();
+    expect(report.routes.find((item) => item.url === `${origin}/eligible`)?.rendered).toBeDefined();
+    expect(report.routes.find((item) => item.url === `${origin}/data`)?.rendered).toBeUndefined();
+    expect(report.routes.find((item) => item.url === `${origin}/old`)?.rendered).toBeUndefined();
+    expect(report.routes.find((item) => item.url === `${origin}/gone`)?.rendered).toBeUndefined();
+    expect(report.config).toMatchObject({
+      rendered: true,
+      renderedConcurrency: 2,
+      renderedTimeoutMs: 1_000,
+      renderedSettleMs: 0,
+    });
   });
 });
 

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Astro SSR deployment guide</title>
+    <meta name="description" content="Deploy an Astro SSR site without hiding content from crawlers.">
+    <link rel="canonical" href="https://example.test/guides/astro-ssr">
+    <link rel="alternate" hreflang="de" href="/de/guides/astro-ssr">
+  </head>
+  <body>
+    <header>
+      <a href="/">Home</a>
+      <a href="/guides">Guides</a>
+    </header>
+    <main>
+      <h1>Deploy Astro with server-rendered content</h1>
+      <p>The article body is present in the initial HTML response.</p>
+      <astro-island component-url="/_astro/Checklist.js" renderer-url="/_astro/client.js" ssr client="visible">
+        <section>
+          <h2>Deployment checklist</h2>
+          <a href="/guides/astro-ssr/adapters">Choose an adapter</a>
+        </section>
+      </astro-island>
+    </main>
+    <template>Template-only text must not become SSR evidence.</template>
+    <script type="module">
+      window.__astroHydrate = "Hydrated-only text must not replace SSR evidence";
+    </script>
+  </body>
+</html>

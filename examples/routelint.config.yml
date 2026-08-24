@@ -1,6 +1,7 @@
 baseUrl: https://example.com
 seeds:
   - /
+urls: []
 sitemaps: auto
 agents:
   - googlebot
@@ -26,6 +27,14 @@ audit:
   requireH1: true
   requireSitemapCoverage: true
   maxDepth: 4
+  severities: {}
+  paths: []
+
+rendered:
+  enabled: false
+  concurrency: 2
+  timeoutMs: 20000
+  settleMs: 250
 
 # Remove this block outside a Next.js project.
 next:

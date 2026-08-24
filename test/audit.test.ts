@@ -7,6 +7,7 @@ import {
   meetsFailureThreshold,
   routeStatus,
 } from "../src/audit.js";
+import { contentEvidenceFromText } from "../src/content.js";
 import type {
   AuditOptions,
   HreflangSignal,
@@ -93,6 +94,7 @@ interface RouteOptions {
   readonly pages?: readonly PageSnapshot[];
   readonly sitemap?: SitemapEntry;
   readonly build?: RouteNode["build"];
+  readonly rendered?: RouteNode["rendered"];
 }
 
 function route(path: string, options: RouteOptions = {}): RouteNode {
@@ -103,10 +105,155 @@ function route(path: string, options: RouteOptions = {}): RouteNode {
     ...(options.sitemap === undefined ? {} : { sitemap: options.sitemap }),
     ...(options.build === undefined ? {} : { build: options.build }),
     snapshots: options.pages ?? [options.page ?? snapshot(path)],
+    ...(options.rendered === undefined ? {} : { rendered: options.rendered }),
     inbound: options.inbound ?? [],
     outbound: options.outbound ?? [],
   };
 }
+
+describe("SSR content evidence", () => {
+  it("detects a successful route that matches a captured not-found body", () => {
+    const notFoundContent = contentEvidenceFromText(
+      "Page not found. The requested page does not exist. Return to the home page.",
+    );
+    const routes = [
+      route("/missing", {
+        page: snapshot("/missing", { status: 404, content: notFoundContent }),
+      }),
+      route("/product/unknown", {
+        page: snapshot("/product/unknown", { content: notFoundContent }),
+      }),
+    ];
+
+    expect(codesFor(auditInput(routes), "/product/unknown")).toContain("soft-404");
+  });
+
+  it("keeps approximate not-found body matches at warning severity", () => {
+    const notFound = contentEvidenceFromText(
+      "page not found requested product does not exist browse catalog or return to home support contact",
+    );
+    const similar = contentEvidenceFromText(
+      "support contact page not found requested product does not exist browse catalog or return to home",
+    );
+    const output = auditSite(
+      auditInput([
+        route("/missing", { page: snapshot("/missing", { status: 404, content: notFound }) }),
+        route("/unknown", { page: snapshot("/unknown", { content: similar }) }),
+      ]),
+    );
+
+    expect(
+      output.findings.find(
+        (finding) => finding.url === absolute("/unknown") && finding.code === "possible-soft-404",
+      ),
+    ).toMatchObject({ severity: "warning" });
+    expect(
+      output.findings.some(
+        (finding) => finding.url === absolute("/unknown") && finding.code === "soft-404",
+      ),
+    ).toBe(false);
+  });
+
+  it("reports content and SEO signals that appear only after JavaScript runs", () => {
+    const page = snapshot(
+      "/app",
+      { content: contentEvidenceFromText("Loading") },
+      { titles: [], canonicals: [], h1s: [] },
+    );
+    const app = route("/app", {
+      page,
+      rendered: {
+        requestedUrl: absolute("/app"),
+        finalUrl: absolute("/app"),
+        status: 200,
+        completion: "complete",
+        signals: signals({
+          titles: [{ value: "Rendered title", location: "head" }],
+          canonicals: [{ value: absolute("/app"), location: "head" }],
+          h1s: [{ value: "Rendered H1", location: "body" }],
+        }),
+        content: contentEvidenceFromText(
+          "A complete product page rendered in the browser with enough useful visible content ".repeat(
+            8,
+          ),
+        ),
+        htmlBytes: 1_000,
+        durationMs: 25,
+      },
+    });
+
+    expect(codesFor(auditInput([app]), "/app")).toEqual(
+      expect.arrayContaining([
+        "client-only-content",
+        "rendered-only-title",
+        "rendered-only-canonical",
+        "rendered-only-h1",
+      ]),
+    );
+  });
+
+  it("reports a browser navigation status mismatch before rendered SEO evidence", () => {
+    const page = snapshot("/gone-after-navigation", {
+      content: contentEvidenceFromText("A complete server-rendered product page"),
+    });
+    const changed = route("/gone-after-navigation", {
+      page,
+      rendered: {
+        requestedUrl: absolute("/gone-after-navigation"),
+        finalUrl: absolute("/gone-after-navigation"),
+        status: 404,
+        completion: "complete",
+        signals: signals({ titles: [], canonicals: [], h1s: [] }),
+        content: contentEvidenceFromText("Page not found"),
+        htmlBytes: 300,
+        durationMs: 12,
+      },
+    });
+
+    const findings = auditSite(auditInput([changed])).findings.filter(
+      (finding) => finding.url === changed.url,
+    );
+    expect(findings).toContainEqual(
+      expect.objectContaining({ code: "rendered-status-mismatch", severity: "error" }),
+    );
+    expect(findings.some((finding) => finding.code.startsWith("rendered-only-"))).toBe(false);
+  });
+
+  it("applies path requirements and severity overrides in declaration order", () => {
+    const docs = route("/docs/page", {
+      page: snapshot("/docs/page", {}, { descriptions: [], h1s: [] }),
+    });
+    const archive = route("/docs/archive/old", {
+      page: snapshot("/docs/archive/old", {}, { descriptions: [], h1s: [] }),
+    });
+    const options: AuditOptions = {
+      ...quietAudit,
+      requireDescription: true,
+      requireH1: true,
+      severities: { "missing-description": "off" },
+      paths: [
+        {
+          include: ["/docs/**"],
+          exclude: ["/docs/archive/**"],
+          requireDescription: false,
+          severities: { "missing-h1": "error" },
+        },
+      ],
+    };
+
+    const output = auditSite(auditInput([docs, archive], { options }));
+    expect(
+      output.findings.find((finding) => finding.url === docs.url && finding.code === "missing-h1")
+        ?.severity,
+    ).toBe("error");
+    expect(output.findings.some((finding) => finding.code === "missing-description")).toBe(false);
+    expect(
+      output.findings.find(
+        (finding) => finding.url === archive.url && finding.code === "missing-h1",
+      )?.severity,
+    ).toBe("warning");
+  });
+});
 
 function auditInput(routes: readonly RouteNode[], overrides: Partial<AuditInput> = {}): AuditInput {
   return {
@@ -463,6 +610,34 @@ describe("depth, orphan, and duplicate audits", () => {
     expect(codes).toContain("duplicate-title");
     expect(codes).toContain("duplicate-canonical");
     expect(codes).toContain("conflicting-description");
+  });
+
+  it("applies path severity to every member of a cross-route duplicate group", () => {
+    const shared = [{ value: "Same title", location: "head" }] as const;
+    const publicRoute = route("/public", {
+      page: snapshot("/public", {}, { titles: shared }),
+    });
+    const docsRoute = route("/docs/private", {
+      page: snapshot("/docs/private", {}, { titles: shared }),
+    });
+    const output = auditSite(
+      auditInput([publicRoute, docsRoute], {
+        options: {
+          ...quietAudit,
+          paths: [
+            {
+              include: ["/docs/**"],
+              exclude: [],
+              severities: { "duplicate-title-across-routes": "error" },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(
+      output.findings.find((finding) => finding.code === "duplicate-title-across-routes"),
+    ).toMatchObject({ severity: "error", url: publicRoute.url });
   });
 });
 

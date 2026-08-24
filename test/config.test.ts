@@ -128,6 +128,37 @@ next:
     });
   });
 
+  it("enables Next.js discovery without replacing a configured project root", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, "routelint.config.yml"),
+      `baseUrl: https://example.test
+next:
+  root: ./configured-site
+  buildDirectory: output
+`,
+      "utf8",
+    );
+
+    const configured = await loadConfig({ cwd: directory, overrides: { enableNext: true } });
+    const implicitDirectory = await temporaryDirectory();
+    const implicit = await loadConfig({
+      cwd: implicitDirectory,
+      overrides: { baseUrl: "https://example.test", enableNext: true },
+    });
+
+    expect(configured.next).toEqual({
+      root: resolve(directory, "configured-site"),
+      buildDirectory: "output",
+      samples: {},
+    });
+    expect(implicit.next).toEqual({
+      root: implicitDirectory,
+      buildDirectory: ".next",
+      samples: {},
+    });
+  });
+
   it("expands whole-value environment header placeholders without interpolating partial text", async () => {
     const directory = await temporaryDirectory();
     vi.stubEnv("ROUTELINT_PREVIEW_TOKEN", "Bearer very-secret");
@@ -149,6 +180,52 @@ next:
       authorization: "Bearer very-secret",
       "x-literal": "prefix-$" + "{ROUTELINT_PREVIEW_TOKEN}",
     });
+  });
+
+  it("loads URL files, rendered capture limits, and path-scoped rule overrides", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, "routelint.config.yml"),
+      `baseUrl: https://example.test
+urls: [targets.txt]
+rendered:
+  enabled: true
+  concurrency: 3
+  timeoutMs: 12000
+  settleMs: 0
+audit:
+  severities:
+    noindex: off
+  paths:
+    - include: [/docs/**]
+      exclude: [/docs/archive/**]
+      requireDescription: false
+      maxDepth: 6
+      severities:
+        missing-h1: info
+`,
+      "utf8",
+    );
+
+    const config = await loadConfig({ cwd: directory });
+
+    expect(config.urlFiles).toEqual([resolve(directory, "targets.txt")]);
+    expect(config.rendered).toEqual({
+      enabled: true,
+      concurrency: 3,
+      timeoutMs: 12_000,
+      settleMs: 0,
+    });
+    expect(config.audit.severities).toEqual({ noindex: "off" });
+    expect(config.audit.paths).toEqual([
+      {
+        include: ["/docs/**"],
+        exclude: ["/docs/archive/**"],
+        requireDescription: false,
+        maxDepth: 6,
+        severities: { "missing-h1": "info" },
+      },
+    ]);
   });
 
   it("fails closed when an environment-backed header is missing", async () => {

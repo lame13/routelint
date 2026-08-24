@@ -18,6 +18,8 @@ RouteLint findings use stable codes, a severity, a direct message, and the URLs 
 | `agent-incomplete-fetch`, `agent-fetch-mismatch` | warning/error | A secondary agent failed or had a different fetch outcome. |
 | `agent-status-mismatch`, `agent-redirect-mismatch`, `agent-content-type-mismatch` | warning/error | Bot and browser-like requests received different HTTP delivery. |
 | `agent-title-mismatch`, `agent-description-mismatch`, `agent-canonical-mismatch`, `agent-robots-mismatch` | warning/error | Server-rendered SEO signals differ between configured agents. |
+| `rendered-capture-incomplete` | warning | The optional browser comparison could not collect complete DOM evidence. |
+| `rendered-status-mismatch` | warning/error | Raw capture and browser navigation returned different HTTP statuses; a success/error split is an error. |
 
 Incomplete captures are not treated as indexable and are not passed through metadata, graph, or duplicate-content checks.
 
@@ -30,6 +32,11 @@ Incomplete captures are not treated as indexable and are not passed through meta
 | `multiple-h1` | The server-rendered HTML contains more than one H1. |
 | `noindex` | An applicable meta or X-Robots-Tag directive prevents indexing. |
 | `invalid-hreflang`, `duplicate-hreflang` | A page-level hreflang value is invalid-looking or repeated. |
+| `empty-ssr-shell` | The raw response contains almost no body text or primary page signals. Browser evidence is required before RouteLint calls it client-only. |
+| `client-only-content` | The raw response is nearly empty while the rendered DOM contains substantial visible text. |
+| `rendered-only-title`, `rendered-only-canonical`, `rendered-only-h1` | A search-relevant signal is absent from raw server HTML and appears only after JavaScript runs. |
+| `soft-404` | A successful response exactly matches a captured 404/410 body. |
+| `possible-soft-404` | A successful response closely resembles a captured error body, or a short response uses a not-found-looking title or H1. |
 
 ## Site graph
 
@@ -44,6 +51,7 @@ Incomplete captures are not treated as indexable and are not passed through meta
 | `route-case-or-slash-variant` | URLs differ only by case or a trailing slash. Review intentional case-sensitive routes before acting. |
 | `duplicate-title-across-routes` | Multiple indexable routes use the same normalized title. |
 | `duplicate-description-across-routes` | Multiple indexable routes use the same normalized description. |
+| `duplicate-content-across-routes` | Multiple indexable routes return the same normalized SSR body text, with a minimum-content threshold. |
 
 ## Sitemaps, canonicals, and hreflang
 
@@ -69,6 +77,28 @@ Incomplete captures are not treated as indexable and are not passed through meta
 | `next-dynamic-route-needs-sample` | A dynamic build pattern has no concrete URL. |
 | `page-budget-reached` | The run stopped adding routes at its configured page limit. Missing-target conclusions become conservative. |
 
-## Changing severity
+## Changing severity and path requirements
 
-Version 0.1 keeps rule severity fixed and changes the process threshold with `--fail-on`. This keeps stored JSON and SARIF reports comparable. A future per-rule override must remain explicit in the report config snapshot.
+`--fail-on` controls the process threshold. Config can separately change or disable a finding code globally:
+
+```yaml
+audit:
+  severities:
+    noindex: info
+    dead-end-route: off
+```
+
+Path scopes change requirements or severity for matching routes. Scopes are applied in declaration order; later matching scopes win. `exclude` removes routes from that scope only.
+
+```yaml
+audit:
+  paths:
+    - include: [/docs/**]
+      exclude: [/docs/archive/**]
+      requireDescription: false
+      maxDepth: 6
+      severities:
+        missing-h1: info
+```
+
+Unknown finding codes are accepted so a config can be prepared before a new rule ships. They have no effect until that code exists.

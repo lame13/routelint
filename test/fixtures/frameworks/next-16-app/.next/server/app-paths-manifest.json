@@ -1,0 +1,15 @@
+{
+  "/(marketing)/page": "app/(marketing)/page.js",
+  "/(marketing)/pricing/page": "app/(marketing)/pricing/page.js",
+  "/account/page": "app/account/page.js",
+  "/blog/[slug]/page": "app/blog/[slug]/page.js",
+  "/docs/[[...parts]]/page": "app/docs/[[...parts]]/page.js",
+  "/products/[slug]/page": "app/products/[slug]/page.js",
+  "/@modal/(.)photo/[id]/page": "app/@modal/(.)photo/[id]/page.js",
+  "/api/revalidate/route": "app/api/revalidate/route.js",
+  "/feed.xml/route": "app/feed.xml/route.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/opengraph-image/route": "app/opengraph-image/route.js",
+  "/robots.txt/route": "app/robots.txt/route.js",
+  "/sitemap.xml/route": "app/sitemap.xml/route.js"
+}

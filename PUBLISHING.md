@@ -1,4 +1,4 @@
-# Publish RouteLint from your Mac
+# Publish RouteLint 0.2.0 from your Mac
 
 This repository intentionally has no npm publish workflow. GitHub Actions tests and packs the project, but every npm publication is run interactively from your terminal and requires your npm account's two-factor authentication.
 
@@ -24,7 +24,7 @@ npm audit --audit-level=low
 npm pack --dry-run
 ```
 
-## 2. Create and push the GitHub repository
+## 2. Push the release commit and wait for CI
 
 If GitHub CLI is not installed or authenticated:
 
@@ -34,14 +34,14 @@ gh auth login
 gh auth status
 ```
 
-Create the local history:
+For a fresh copy of the release ZIP, initialize a `main` branch before the first commit:
 
 ```bash
 git init -b main
 git status --short
 git add .
 git diff --cached --check
-git commit -m "Initial RouteLint release"
+git commit -m "Release RouteLint 0.2.0"
 ```
 
 Create and push the public repository:
@@ -52,8 +52,18 @@ gh repo create lame13/routelint \
   --source=. \
   --remote=origin \
   --push \
-  --description "Lint the routes, links, canonicals, sitemaps, and indexability signals your SSR site actually ships." \
+  --description "Audit the routes, SSR content, links, canonicals, sitemaps, and indexability signals a site actually ships." \
   --homepage "https://nikom.work"
+```
+
+For an existing Git checkout that already has the correct `origin`, commit normally and push instead:
+
+```bash
+git status --short
+git add .
+git diff --cached --check
+git commit -m "Release RouteLint 0.2.0"
+git push origin main
 ```
 
 Add repository topics:
@@ -69,6 +79,8 @@ gh repo edit lame13/routelint \
   --add-topic sitemap \
   --add-topic hreflang \
   --add-topic link-checker \
+  --add-topic soft-404 \
+  --add-topic playwright \
   --add-topic typescript \
   --add-topic cli \
   --add-topic sarif
@@ -87,9 +99,9 @@ gh run list --repo lame13/routelint --workflow CI
 gh run watch --repo lame13/routelint --exit-status
 ```
 
-The CI workflow has no Docker job and no npm publishing job. It runs Node 22.12 and 24 tests on Linux plus installed-package smoke tests on macOS and Windows.
+The CI workflow has no Docker job and no npm publishing job. It runs Node 22.12 and 24 tests on Linux plus installed-package smoke tests on macOS and Windows. Connecting an npm package to GitHub later does not require adding a publish job.
 
-## 3. Make the first npm publication interactively
+## 3. Publish 0.2.0 interactively
 
 Sign in through npm's interactive web flow, confirm the account, and inspect its 2FA mode:
 
@@ -97,10 +109,18 @@ Sign in through npm's interactive web flow, confirm the account, and inspect its
 npm login --auth-type=web
 npm whoami
 npm profile get
-npm view routelint
+npm view routelint version dist-tags repository.url
 ```
 
-`npm profile get` must show `two-factor auth: auth-and-writes`. If it does not, stop and enable account 2FA before publishing. New 2FA setups should use a WebAuthn security key or passkey through npmjs.com. Before the first publication, `npm view routelint` should return `E404`. A different result means the name is no longer available; stop and inspect it rather than publishing under an unexpected package.
+`npm profile get` must show `two-factor auth: auth-and-writes`. If it does not, stop and enable account 2FA before publishing. npm's interactive flow uses a security key or passkey. Confirm that the registry shows the expected prior RouteLint version. `E404` is acceptable only if 0.2.0 will be the first publication.
+
+Verify the release identity before doing anything irreversible:
+
+```bash
+node -p "require('./package.json').version"
+npm pkg get name version repository homepage
+test "$(node -p "require('./package.json').version")" = "0.2.0"
+```
 
 Run the complete release gate again:
 
@@ -124,10 +144,10 @@ Verify the registry result:
 
 ```bash
 npm view routelint version dist-tags repository.url engines
-npx --yes routelint@0.1.0 --version
+npx --yes routelint@0.2.0 --version
 ```
 
-npm's current default for new packages still permits a granular access token configured to bypass 2FA. After the package exists, open `https://www.npmjs.com/package/routelint/access`, choose **Require two-factor authentication and disallow tokens (Recommended)** under Publishing access, and save it with the interactive 2FA challenge.
+npm requires 2FA or a granular token that bypasses it for publishing. This project deliberately uses neither a token nor automated publication. Open `https://www.npmjs.com/package/routelint/access`, choose **Require two-factor authentication and disallow tokens (Recommended)** under Publishing access, and save it with the interactive 2FA challenge.
 
 - [Require 2FA for package publishing and settings changes](https://docs.npmjs.com/requiring-2fa-for-package-publishing-and-settings-modification/)
 - [npm account 2FA](https://docs.npmjs.com/configuring-two-factor-authentication/)
@@ -135,13 +155,13 @@ npm's current default for new packages still permits a granular access token con
 ## 4. Create the matching source release
 
 ```bash
-git tag -a v0.1.0 -m "RouteLint v0.1.0"
-git push origin v0.1.0
-gh release create v0.1.0 \
+git tag -a v0.2.0 -m "RouteLint v0.2.0"
+git push origin v0.2.0
+gh release create v0.2.0 \
   --verify-tag \
   --generate-notes \
   --latest \
-  --title "RouteLint v0.1.0"
+  --title "RouteLint v0.2.0"
 ```
 
 Keep future releases interactive: bump the version and changelog, rerun the release gate, publish from a real terminal with its 2FA prompt, then push the matching annotated Git tag and GitHub release. Do not add an npm publishing workflow or a bypass-2FA token without deliberately changing this release policy.
