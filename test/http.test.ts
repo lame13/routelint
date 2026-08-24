@@ -88,6 +88,7 @@ describe("capturePage", () => {
     ]);
     expect(snapshot.headers["set-cookie"]).toBe("[redacted]");
     expect(snapshot.bodySha256).toBe(createHash("sha256").update(body).digest("hex"));
+    expect(snapshot.content).toMatchObject({ characters: 5, words: 1 });
   });
 
   it("never forwards custom headers across an origin-changing redirect", async () => {
@@ -163,6 +164,7 @@ describe("capturePage", () => {
 
     expect(snapshot.completion).toBe("complete");
     expect(snapshot.signals.titles).toEqual([]);
+    expect(snapshot.content).toBeUndefined();
     expect(snapshot.bodySha256).toBe(createHash("sha256").update(body).digest("hex"));
   });
 

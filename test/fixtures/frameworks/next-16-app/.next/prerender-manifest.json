@@ -1,0 +1,36 @@
+{
+  "version": 4,
+  "routes": {
+    "/": {
+      "initialRevalidateSeconds": false,
+      "srcRoute": null,
+      "dataRoute": "/_next/data/fixture-next-16-build/index.json"
+    },
+    "/pricing": {
+      "initialRevalidateSeconds": false,
+      "srcRoute": null,
+      "dataRoute": "/_next/data/fixture-next-16-build/pricing.json",
+      "renderingMode": "PARTIALLY_STATIC",
+      "experimentalPPR": true
+    },
+    "/products/widget": {
+      "initialRevalidateSeconds": 300,
+      "srcRoute": "/products/[slug]",
+      "dataRoute": "/_next/data/fixture-next-16-build/products/widget.json"
+    }
+  },
+  "dynamicRoutes": {
+    "/products/[slug]": {
+      "routeRegex": "^/products/([^/]+?)(?:/)?$",
+      "dataRoute": "/_next/data/fixture-next-16-build/products/[slug].json",
+      "fallback": null,
+      "dataRouteRegex": "^/_next/data/fixture-next-16-build/products/([^/]+?)\\.json$"
+    }
+  },
+  "notFoundRoutes": [],
+  "preview": {
+    "previewModeId": "fixture-preview-id",
+    "previewModeSigningKey": "fixture-signing-key",
+    "previewModeEncryptionKey": "fixture-encryption-key"
+  }
+}

@@ -8,6 +8,7 @@ import type {
   MetadataSignal,
   PageSignals,
   PageSnapshot,
+  RenderedPageSnapshot,
   RobotsFile,
   RobotsSignal,
   RouteLintReport,
@@ -101,6 +102,19 @@ function snapshot(value: PageSnapshot, secrets: readonly string[]): PageSnapshot
       url: text(hop.url, secrets),
       location: text(hop.location, secrets),
     })),
+    signals: signals(value.signals, secrets),
+    ...(value.error === undefined ? {} : { error: text(value.error, secrets) }),
+  };
+}
+
+function renderedSnapshot(
+  value: RenderedPageSnapshot,
+  secrets: readonly string[],
+): RenderedPageSnapshot {
+  return {
+    ...value,
+    requestedUrl: text(value.requestedUrl, secrets),
+    finalUrl: text(value.finalUrl, secrets),
     signals: signals(value.signals, secrets),
     ...(value.error === undefined ? {} : { error: text(value.error, secrets) }),
   };
@@ -202,6 +216,9 @@ function route(
     ...(value.sitemap === undefined ? {} : { sitemap: sitemapEntry(value.sitemap, secrets) }),
     ...(value.build === undefined ? {} : { build: buildRoute(value.build, secrets, localPaths) }),
     snapshots: value.snapshots.map((item) => snapshot(item, secrets)),
+    ...(value.rendered === undefined
+      ? {}
+      : { rendered: renderedSnapshot(value.rendered, secrets) }),
     inbound: value.inbound.map((url) => text(url, secrets)),
     outbound: value.outbound.map((url) => text(url, secrets)),
   };
@@ -247,7 +264,34 @@ export function redactReport(
     config: {
       ...report.config,
       agents: report.config.agents.map((agent) => text(agent, secrets)),
+      ...(report.config.seeds === undefined
+        ? {}
+        : { seeds: report.config.seeds.map((seed) => reference(seed, secrets)) }),
+      ...(report.config.sitemapUrls === undefined
+        ? {}
+        : {
+            sitemapUrls: report.config.sitemapUrls.map((sitemapUrl) =>
+              reference(sitemapUrl, secrets),
+            ),
+          }),
+      ...(report.config.include === undefined
+        ? {}
+        : { include: report.config.include.map((pattern) => text(pattern, secrets)) }),
+      ...(report.config.exclude === undefined
+        ? {}
+        : { exclude: report.config.exclude.map((pattern) => text(pattern, secrets)) }),
+      ...(report.config.headerNames === undefined
+        ? {}
+        : { headerNames: report.config.headerNames.map((name) => text(name, secrets)) }),
     },
+    ...(report.inputs === undefined
+      ? {}
+      : {
+          inputs: {
+            ...report.inputs,
+            warnings: report.inputs.warnings.map((warning) => text(warning, secrets)),
+          },
+        }),
     ...(report.build === undefined ? {} : { build: build(report.build, secrets) }),
     sitemap: sitemap(report.sitemap, secrets),
     ...(report.robots === undefined ? {} : { robots: robots(report.robots, secrets) }),

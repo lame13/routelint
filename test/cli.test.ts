@@ -105,6 +105,9 @@ describe("packaged-style CLI execution", () => {
     expect(check.stdout).toContain("Usage: routelint check [options] [base-url]");
     expect(check.stdout).toContain("--max-pages <count>");
     expect(check.stdout).toContain("--ignore-robots");
+    expect(check.stdout).toContain("--urls <file>");
+    expect(check.stdout).toContain("--rendered");
+    expect(check.stdout).toContain("--changed-only <baseline.json>");
   });
 
   it("prints the package version", async () => {

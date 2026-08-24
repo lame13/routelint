@@ -9,7 +9,9 @@ import type {
   AuditOptions,
   CrawlLimits,
   NextOptions,
+  PathAuditOptions,
   QueryPolicy,
+  RenderedOptions,
   RouteLintConfig,
 } from "./types.js";
 
@@ -21,11 +23,21 @@ const CONFIG_FILENAMES = [
 
 const positiveInteger = z.number().int().positive();
 const nonNegativeInteger = z.number().int().nonnegative();
+const severityOverrides = z.record(z.string().min(1), z.enum(["error", "warning", "info", "off"]));
+const auditRequirementOverrides = {
+  requireTitle: z.boolean().optional(),
+  requireDescription: z.boolean().optional(),
+  requireCanonical: z.boolean().optional(),
+  requireH1: z.boolean().optional(),
+  requireSitemapCoverage: z.boolean().optional(),
+  maxDepth: nonNegativeInteger.optional(),
+} as const;
 
 const rawConfigSchema = z
   .object({
     baseUrl: z.string().optional(),
     seeds: z.array(z.string()).optional(),
+    urls: z.array(z.string()).optional(),
     sitemaps: z.union([z.literal("auto"), z.array(z.string())]).optional(),
     agents: z.array(z.string()).min(1).optional(),
     headers: z.record(z.string(), z.string()).optional(),
@@ -46,12 +58,29 @@ const rawConfigSchema = z
       .optional(),
     audit: z
       .object({
-        requireTitle: z.boolean().optional(),
-        requireDescription: z.boolean().optional(),
-        requireCanonical: z.boolean().optional(),
-        requireH1: z.boolean().optional(),
-        requireSitemapCoverage: z.boolean().optional(),
-        maxDepth: nonNegativeInteger.optional(),
+        ...auditRequirementOverrides,
+        severities: severityOverrides.optional(),
+        paths: z
+          .array(
+            z
+              .object({
+                include: z.array(z.string()).min(1),
+                exclude: z.array(z.string()).optional(),
+                ...auditRequirementOverrides,
+                severities: severityOverrides.optional(),
+              })
+              .strict(),
+          )
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    rendered: z
+      .object({
+        enabled: z.boolean().optional(),
+        concurrency: positiveInteger.optional(),
+        timeoutMs: positiveInteger.optional(),
+        settleMs: nonNegativeInteger.optional(),
       })
       .strict()
       .optional(),
@@ -79,12 +108,18 @@ export interface ConfigOverrides {
   readonly agents?: readonly string[];
   readonly headers?: Readonly<Record<string, string>>;
   readonly sitemaps?: readonly string[];
+  readonly urlFiles?: readonly string[];
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
   readonly queryPolicy?: QueryPolicy;
   readonly respectRobots?: boolean;
+  readonly rendered?: boolean;
+  readonly renderedConcurrency?: number;
+  readonly renderedTimeoutMs?: number;
+  readonly renderedSettleMs?: number;
   readonly nextRoot?: string;
   readonly buildDirectory?: string;
+  readonly enableNext?: boolean;
 }
 
 export interface LoadConfigOptions {
@@ -110,6 +145,15 @@ const DEFAULT_AUDIT: AuditOptions = Object.freeze({
   requireH1: true,
   requireSitemapCoverage: true,
   maxDepth: 4,
+  severities: {},
+  paths: [],
+});
+
+const DEFAULT_RENDERED: RenderedOptions = Object.freeze({
+  enabled: false,
+  concurrency: 2,
+  timeoutMs: 20_000,
+  settleMs: 250,
 });
 
 function parseHttpUrl(value: string, label: string): URL {
@@ -229,7 +273,9 @@ function resolveNextOptions(
   overrides: ConfigOverrides,
   baseDirectory: string,
 ): NextOptions | undefined {
-  if (raw.next === undefined && overrides.nextRoot === undefined) return undefined;
+  if (raw.next === undefined && overrides.nextRoot === undefined && overrides.enableNext !== true) {
+    return undefined;
+  }
   const configuredRoot = overrides.nextRoot ?? raw.next?.root ?? ".";
   const root = isAbsolute(configuredRoot) ? configuredRoot : resolve(baseDirectory, configuredRoot);
   return {
@@ -237,6 +283,30 @@ function resolveNextOptions(
     buildDirectory: overrides.buildDirectory ?? raw.next?.buildDirectory ?? ".next",
     samples: raw.next?.samples ?? {},
   };
+}
+
+function resolvePathAuditOptions(raw: RawConfig): readonly PathAuditOptions[] {
+  return (raw.audit?.paths ?? []).map((scope) => ({
+    include: [...scope.include],
+    exclude: [...(scope.exclude ?? [])],
+    ...(scope.requireTitle === undefined ? {} : { requireTitle: scope.requireTitle }),
+    ...(scope.requireDescription === undefined
+      ? {}
+      : { requireDescription: scope.requireDescription }),
+    ...(scope.requireCanonical === undefined ? {} : { requireCanonical: scope.requireCanonical }),
+    ...(scope.requireH1 === undefined ? {} : { requireH1: scope.requireH1 }),
+    ...(scope.requireSitemapCoverage === undefined
+      ? {}
+      : { requireSitemapCoverage: scope.requireSitemapCoverage }),
+    ...(scope.maxDepth === undefined ? {} : { maxDepth: scope.maxDepth }),
+    severities: { ...(scope.severities ?? {}) },
+  }));
+}
+
+function resolveLocalFiles(values: readonly string[], baseDirectory: string): readonly string[] {
+  return values.map((value) =>
+    value === "-" || isAbsolute(value) ? value : resolve(baseDirectory, value),
+  );
 }
 
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<RouteLintConfig> {
@@ -280,6 +350,16 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Route
     requireSitemapCoverage:
       raw.audit?.requireSitemapCoverage ?? DEFAULT_AUDIT.requireSitemapCoverage,
     maxDepth: raw.audit?.maxDepth ?? DEFAULT_AUDIT.maxDepth,
+    severities: { ...(raw.audit?.severities ?? {}) },
+    paths: resolvePathAuditOptions(raw),
+  };
+
+  const rendered: RenderedOptions = {
+    enabled: overrides.rendered ?? raw.rendered?.enabled ?? DEFAULT_RENDERED.enabled,
+    concurrency:
+      overrides.renderedConcurrency ?? raw.rendered?.concurrency ?? DEFAULT_RENDERED.concurrency,
+    timeoutMs: overrides.renderedTimeoutMs ?? raw.rendered?.timeoutMs ?? DEFAULT_RENDERED.timeoutMs,
+    settleMs: overrides.renderedSettleMs ?? raw.rendered?.settleMs ?? DEFAULT_RENDERED.settleMs,
   };
 
   const seedValues = raw.seeds ?? [baseUrl];
@@ -294,6 +374,10 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Route
   return {
     baseUrl,
     seeds: resolveUrlList(seedValues, seedResolutionBase(raw.baseUrl, baseUrl), "seeds"),
+    urlFiles:
+      overrides.urlFiles === undefined
+        ? resolveLocalFiles(raw.urls ?? [], baseDirectory)
+        : resolveLocalFiles(overrides.urlFiles, cwd),
     sitemaps,
     agents,
     headers: resolveHeaders(raw.headers ?? {}, overrides.headers ?? {}),
@@ -303,6 +387,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Route
     respectRobots: overrides.respectRobots ?? raw.respectRobots ?? true,
     limits,
     audit,
+    rendered,
     ...(next === undefined ? {} : { next }),
   };
 }
@@ -331,6 +416,7 @@ export const DEFAULT_CONFIG_YAML = `# RouteLint stays within one origin and stop
 baseUrl: https://example.com
 seeds:
   - /
+urls: []
 sitemaps: auto
 agents:
   - routelint
@@ -352,6 +438,23 @@ audit:
   requireH1: true
   requireSitemapCoverage: true
   maxDepth: 4
+  severities: {}
+  paths: []
+
+# Path scopes are applied in declaration order:
+# audit:
+#   paths:
+#     - include: [/docs/**]
+#       requireDescription: false
+#       severities:
+#         missing-h1: info
+
+# Browser rendering is optional and requires Playwright plus Chromium.
+rendered:
+  enabled: false
+  concurrency: 2
+  timeoutMs: 20000
+  settleMs: 250
 
 # Next.js build discovery is optional. Remove this block for URL-only checks.
 next:

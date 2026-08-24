@@ -7,7 +7,9 @@ export {
   meetsFailureThreshold,
   routeStatus,
 } from "./audit.js";
+export { changedOnlyReport } from "./changed.js";
 export { loadConfig, parseHeaderOptions } from "./config.js";
+export { contentEvidenceFromText, extractContentEvidence, simhashDistance } from "./content.js";
 export { crawl, crawlSite, isAllowedByRobots } from "./crawl.js";
 export {
   diffReports,
@@ -35,9 +37,28 @@ export {
 } from "./discovery/robots.js";
 export type { FetchSitemapsOptions, ParsedSitemap } from "./discovery/sitemap.js";
 export { fetchSitemaps, parseSitemapXml } from "./discovery/sitemap.js";
+export type {
+  LoadUrlListsOptions,
+  UrlListDiagnostic,
+  UrlListDiagnosticCode,
+  UrlListDiagnosticSeverity,
+  UrlListEntry,
+  UrlListInventory,
+  UrlListSourceSummary,
+} from "./discovery/url-list.js";
+export { loadUrlLists } from "./discovery/url-list.js";
 export { emptyPageSignals, parseHtml, parseXRobotsTag } from "./html-parser.js";
 export { capturePage, captureUrl, isHtmlContentType } from "./http.js";
 export { redactReport } from "./redact.js";
+export type {
+  RenderedCaptureDependencies,
+  RenderedCaptureOptions,
+} from "./rendered.js";
+export {
+  captureRenderedPage,
+  captureRenderedPages,
+  RenderedCaptureUnavailableError,
+} from "./rendered.js";
 export {
   renderHtmlReport,
   renderJsonReport,
@@ -53,20 +74,27 @@ export type {
   BuildInventory,
   BuildRedirect,
   BuildRoute,
+  ChangedOnlyComparison,
   CrawlLimits,
   CrawlOptions,
   DiffChange,
   DiscoveredRobotsFile,
   Finding,
   HreflangSignal,
+  InputInventory,
   LinkSignal,
   MetadataSignal,
   NextOptions,
   PageCompletion,
+  PageContentEvidence,
   PageSignals,
   PageSnapshot,
+  PathAuditOptions,
   QueryPolicy,
   RedirectHop,
+  RenderedCompletion,
+  RenderedOptions,
+  RenderedPageSnapshot,
   RenderMode,
   ReportConfigSnapshot,
   ReportFormat,
@@ -84,6 +112,7 @@ export type {
   RouteNode,
   RouteSource,
   RouteSourceKind,
+  RuleSeverity,
   Severity,
   SitemapEntry,
   SitemapInventory,

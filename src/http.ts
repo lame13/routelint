@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { extractContentEvidence } from "./content.js";
 import { emptyPageSignals, parseHtml, parseXRobotsTag } from "./html-parser.js";
-import type { AgentProfile, PageSnapshot, RedirectHop } from "./types.js";
+import type { AgentProfile, PageContentEvidence, PageSnapshot, RedirectHop } from "./types.js";
 import { normalizeUrl, redactErrorText, redactUrlReference } from "./url.js";
 
 const REDACTED_HEADER = "[redacted]";
@@ -128,9 +129,11 @@ export async function capturePage(
     const body = await readBody(currentResponse, options.maxBytes, controller.signal);
     const contentType = currentResponse.headers.get("content-type") ?? undefined;
     let signals = emptyPageSignals();
-    if (contentType !== undefined && isHtmlContentType(contentType)) {
-      const html = decodeBody(body.bytes, contentType);
+    let content: PageContentEvidence | undefined;
+    if (contentType === undefined || isHtmlContentType(contentType)) {
+      const html = decodeBody(body.bytes, contentType ?? "text/html; charset=utf-8");
       signals = parseHtml(html, currentUrl);
+      content = extractContentEvidence(html);
     }
     const headerRobots = parseXRobotsTag(currentResponse.headers.get("x-robots-tag"));
     if (headerRobots.length > 0)
@@ -147,6 +150,7 @@ export async function capturePage(
       signals,
       bytesRead: body.bytesRead,
       bodySha256: body.sha256,
+      ...(content === undefined ? {} : { content }),
       durationMs: roundedDuration(startedAt),
       completion: body.exceeded ? "max-bytes-exceeded" : "complete",
     };

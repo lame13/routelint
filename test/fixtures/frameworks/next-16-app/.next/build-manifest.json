@@ -1,0 +1,16 @@
+{
+  "polyfillFiles": [],
+  "devFiles": [],
+  "ampDevFiles": [],
+  "lowPriorityFiles": [
+    "static/fixture-next-16-build/_buildManifest.js",
+    "static/fixture-next-16-build/_ssgManifest.js"
+  ],
+  "rootMainFiles": ["static/chunks/webpack.js", "static/chunks/main-app.js"],
+  "pages": {
+    "/_app": ["static/chunks/pages/_app.js"],
+    "/legacy": ["static/chunks/pages/legacy.js"],
+    "/api/health": ["static/chunks/pages/api/health.js"]
+  },
+  "ampFirstPages": []
+}

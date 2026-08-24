@@ -216,6 +216,9 @@ describe("HTML reporter", () => {
     expect(output).toContain("Incomplete evidence");
     expect(output).toContain("Site checker: 200 · Browser: 200");
     expect(output).toContain("Site checker: indexable · Browser: indexable");
+    expect(output).toContain("Agent response differences");
+    expect(output).toContain("No response differences were found between configured agents");
+    expect(output).toContain("Rendered evidence");
     expect(output).toContain('label for="route-search"');
     expect(output).toContain("prefers-reduced-motion");
     expect(output).toContain("https://nikom.work");
@@ -223,6 +226,24 @@ describe("HTML reporter", () => {
     expect(output).not.toMatch(/<link\b/i);
     expect(output).not.toMatch(/@(?:import|font-face)/i);
     expect(output.toLowerCase()).not.toContain("seo score");
+  });
+
+  it("states when findings have been filtered against a baseline", () => {
+    const output = renderHtmlReport({
+      ...fixture(),
+      comparison: {
+        mode: "changed-only",
+        baselineGeneratedAt: "2026-08-20T00:00:00.000Z",
+        newFindings: 1,
+        worsenedFindings: 1,
+        resolvedFindings: 2,
+        unchangedFindings: 8,
+      },
+    });
+
+    expect(output).toContain("Changed-only report");
+    expect(output).toContain("1 new and 1 worsened");
+    expect(output).toContain("2 resolved and 8 unchanged");
   });
 
   it("escapes every report value before placing it in HTML or SVG", () => {

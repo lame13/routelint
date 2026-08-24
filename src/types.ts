@@ -1,4 +1,5 @@
 export type Severity = "error" | "warning" | "info";
+export type RuleSeverity = Severity | "off";
 export type ReportFormat = "terminal" | "json" | "sarif" | "html";
 export type QueryPolicy = "drop" | "keep";
 export type PageCompletion =
@@ -8,7 +9,13 @@ export type PageCompletion =
   | "network-error"
   | "invalid-response"
   | "robots-blocked";
-export type RouteSourceKind = "seed" | "sitemap" | "internal-link" | "next-build" | "sample";
+export type RouteSourceKind =
+  | "seed"
+  | "sitemap"
+  | "internal-link"
+  | "next-build"
+  | "sample"
+  | "url-list";
 export type RenderMode = "static" | "isr" | "dynamic" | "unknown";
 
 export interface AgentProfile {
@@ -145,6 +152,15 @@ export interface PageSignals {
   readonly baseHref?: string;
 }
 
+/** Body-text measurements and fingerprints. The normalized text itself is never stored. */
+export interface PageContentEvidence {
+  readonly characters: number;
+  readonly words: number;
+  readonly sha256: string;
+  /** 64-bit SimHash encoded as 16 lowercase hexadecimal characters. */
+  readonly simhash: string;
+}
+
 export interface PageSnapshot {
   readonly requestedUrl: string;
   readonly finalUrl: string;
@@ -156,8 +172,24 @@ export interface PageSnapshot {
   readonly signals: PageSignals;
   readonly bytesRead: number;
   readonly bodySha256?: string;
+  readonly content?: PageContentEvidence;
   readonly durationMs: number;
   readonly completion: PageCompletion;
+  readonly error?: string;
+}
+
+export type RenderedCompletion = "complete" | "timeout" | "navigation-error" | "capture-error";
+
+/** Evidence collected after a browser executes the page's JavaScript. */
+export interface RenderedPageSnapshot {
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly status?: number;
+  readonly completion: RenderedCompletion;
+  readonly signals: PageSignals;
+  readonly content?: PageContentEvidence;
+  readonly htmlBytes: number;
+  readonly durationMs: number;
   readonly error?: string;
 }
 
@@ -169,6 +201,7 @@ export interface RouteNode {
   readonly sitemap?: SitemapEntry;
   readonly build?: BuildRoute;
   readonly snapshots: readonly PageSnapshot[];
+  readonly rendered?: RenderedPageSnapshot;
   readonly inbound: readonly string[];
   readonly outbound: readonly string[];
 }
@@ -202,6 +235,7 @@ export interface RouteLintReport {
   readonly durationMs: number;
   readonly baseUrl: string;
   readonly config: ReportConfigSnapshot;
+  readonly inputs?: InputInventory;
   readonly build?: BuildInventory;
   readonly sitemap: SitemapInventory;
   readonly robots?: RobotsFile;
@@ -209,6 +243,22 @@ export interface RouteLintReport {
   readonly findings: readonly Finding[];
   readonly summary: RouteLintSummary;
   readonly truncated: boolean;
+  readonly comparison?: ChangedOnlyComparison;
+}
+
+export interface InputInventory {
+  readonly urlListFiles: number;
+  readonly urlListUrls: number;
+  readonly warnings: readonly string[];
+}
+
+export interface ChangedOnlyComparison {
+  readonly mode: "changed-only";
+  readonly baselineGeneratedAt: string;
+  readonly newFindings: number;
+  readonly worsenedFindings: number;
+  readonly resolvedFindings: number;
+  readonly unchangedFindings: number;
 }
 
 export interface ReportConfigSnapshot {
@@ -217,6 +267,21 @@ export interface ReportConfigSnapshot {
   readonly agents: readonly string[];
   readonly respectRobots: boolean;
   readonly queryPolicy: QueryPolicy;
+  readonly seeds?: readonly string[];
+  readonly sitemapMode?: "auto" | "explicit";
+  readonly sitemapUrls?: readonly string[];
+  readonly include?: readonly string[];
+  readonly exclude?: readonly string[];
+  readonly timeoutMs?: number;
+  readonly maxBytes?: number;
+  readonly maxRedirects?: number;
+  readonly rendered?: boolean;
+  readonly renderedConcurrency?: number;
+  readonly renderedTimeoutMs?: number;
+  readonly renderedSettleMs?: number;
+  readonly headerNames?: readonly string[];
+  readonly urlListFiles?: number;
+  readonly audit?: AuditOptions;
 }
 
 export interface CrawlLimits {
@@ -256,6 +321,27 @@ export interface AuditOptions {
   readonly requireH1: boolean;
   readonly requireSitemapCoverage: boolean;
   readonly maxDepth: number;
+  readonly severities?: Readonly<Record<string, RuleSeverity>>;
+  readonly paths?: readonly PathAuditOptions[];
+}
+
+export interface PathAuditOptions {
+  readonly include: readonly string[];
+  readonly exclude: readonly string[];
+  readonly requireTitle?: boolean;
+  readonly requireDescription?: boolean;
+  readonly requireCanonical?: boolean;
+  readonly requireH1?: boolean;
+  readonly requireSitemapCoverage?: boolean;
+  readonly maxDepth?: number;
+  readonly severities?: Readonly<Record<string, RuleSeverity>>;
+}
+
+export interface RenderedOptions {
+  readonly enabled: boolean;
+  readonly concurrency: number;
+  readonly timeoutMs: number;
+  readonly settleMs: number;
 }
 
 export interface NextOptions {
@@ -267,6 +353,7 @@ export interface NextOptions {
 export interface RouteLintConfig {
   readonly baseUrl: string;
   readonly seeds: readonly string[];
+  readonly urlFiles?: readonly string[];
   readonly sitemaps: "auto" | readonly string[];
   readonly agents: readonly AgentProfile[];
   readonly headers: Readonly<Record<string, string>>;
@@ -276,6 +363,7 @@ export interface RouteLintConfig {
   readonly respectRobots: boolean;
   readonly limits: CrawlLimits;
   readonly audit: AuditOptions;
+  readonly rendered?: RenderedOptions;
   readonly next?: NextOptions;
 }
 

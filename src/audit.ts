@@ -1,3 +1,4 @@
+import { simhashDistance } from "./content.js";
 import type {
   AuditOptions,
   BuildInventory,
@@ -9,6 +10,7 @@ import type {
   Severity,
   SitemapInventory,
 } from "./types.js";
+import { isUrlIncluded } from "./url.js";
 
 export interface AuditInput {
   readonly baseUrl: string;
@@ -32,6 +34,14 @@ const SEVERITY_ORDER: Readonly<Record<Severity, number>> = {
   warning: 1,
   info: 2,
 };
+
+const ROUTE_GROUP_FINDINGS = new Set([
+  "duplicate-canonical-target",
+  "duplicate-title-across-routes",
+  "duplicate-description-across-routes",
+  "duplicate-content-across-routes",
+  "route-case-or-slash-variant",
+]);
 
 function primarySnapshot(route: RouteNode): PageSnapshot | undefined {
   return route.snapshots[0];
@@ -120,6 +130,57 @@ function pushFinding(findings: Finding[], finding: Finding): void {
   findings.push(finding);
 }
 
+function optionsForRoute(options: AuditOptions, url: string): AuditOptions {
+  let effective: AuditOptions = options;
+  for (const scope of options.paths ?? []) {
+    if (!isUrlIncluded(url, scope.include, scope.exclude)) continue;
+    effective = {
+      ...effective,
+      ...(scope.requireTitle === undefined ? {} : { requireTitle: scope.requireTitle }),
+      ...(scope.requireDescription === undefined
+        ? {}
+        : { requireDescription: scope.requireDescription }),
+      ...(scope.requireCanonical === undefined ? {} : { requireCanonical: scope.requireCanonical }),
+      ...(scope.requireH1 === undefined ? {} : { requireH1: scope.requireH1 }),
+      ...(scope.requireSitemapCoverage === undefined
+        ? {}
+        : { requireSitemapCoverage: scope.requireSitemapCoverage }),
+      ...(scope.maxDepth === undefined ? {} : { maxDepth: scope.maxDepth }),
+    };
+  }
+  return effective;
+}
+
+function applySeverityConfiguration(
+  findings: readonly Finding[],
+  options: AuditOptions,
+): readonly Finding[] {
+  const configured: Finding[] = [];
+  for (const finding of findings) {
+    const affectedUrls =
+      finding.url === undefined
+        ? []
+        : ROUTE_GROUP_FINDINGS.has(finding.code)
+          ? [finding.url, ...(finding.relatedUrls ?? [])]
+          : [finding.url];
+    const severities = (affectedUrls.length === 0 ? [undefined] : affectedUrls).map((url) => {
+      let severity = options.severities?.[finding.code];
+      for (const scope of options.paths ?? []) {
+        if (url === undefined || !isUrlIncluded(url, scope.include, scope.exclude)) continue;
+        severity = scope.severities?.[finding.code] ?? severity;
+      }
+      return severity ?? finding.severity;
+    });
+    const active = severities.filter((severity): severity is Severity => severity !== "off");
+    if (active.length === 0) continue;
+    const severity = active.reduce((highest, candidate) =>
+      SEVERITY_ORDER[candidate] < SEVERITY_ORDER[highest] ? candidate : highest,
+    );
+    configured.push(severity === finding.severity ? finding : { ...finding, severity });
+  }
+  return configured;
+}
+
 function checkRepeated(
   findings: Finding[],
   route: RouteNode,
@@ -143,6 +204,7 @@ function checkRepeated(
 }
 
 function checkPage(findings: Finding[], route: RouteNode, options: AuditOptions): void {
+  options = optionsForRoute(options, route.url);
   const snapshot = primarySnapshot(route);
   if (snapshot === undefined) {
     pushFinding(findings, {
@@ -334,6 +396,108 @@ function checkPage(findings: Finding[], route: RouteNode, options: AuditOptions)
       url: route.url,
       message: `The route declares ${language} more than once.`,
       evidence: { language, count },
+    });
+  }
+
+  checkRenderedEvidence(findings, route, snapshot);
+}
+
+function checkRenderedEvidence(
+  findings: Finding[],
+  route: RouteNode,
+  snapshot: PageSnapshot,
+): void {
+  const raw = snapshot.content;
+  const rendered = route.rendered;
+  if (rendered === undefined) {
+    if (
+      raw !== undefined &&
+      raw.characters <= 20 &&
+      snapshot.signals.titles.length === 0 &&
+      snapshot.signals.h1s.length === 0
+    ) {
+      pushFinding(findings, {
+        code: "empty-ssr-shell",
+        severity: "warning",
+        url: route.url,
+        message: "The server response contains almost no body text or primary page signals.",
+        evidence: { ssrCharacters: raw.characters, ssrWords: raw.words },
+      });
+    }
+    return;
+  }
+
+  if (rendered.completion !== "complete") {
+    pushFinding(findings, {
+      code: "rendered-capture-incomplete",
+      severity: "warning",
+      url: route.url,
+      message: `The browser-rendered comparison was incomplete (${rendered.completion}).`,
+    });
+    return;
+  }
+
+  if (rendered.status !== snapshot.status) {
+    const ssrSuccessful =
+      snapshot.status !== undefined && snapshot.status >= 200 && snapshot.status < 300;
+    const renderedSuccessful =
+      rendered.status !== undefined && rendered.status >= 200 && rendered.status < 300;
+    pushFinding(findings, {
+      code: "rendered-status-mismatch",
+      severity: ssrSuccessful === renderedSuccessful ? "warning" : "error",
+      url: route.url,
+      message: "The browser navigation and server capture returned different HTTP statuses.",
+      evidence: {
+        ssrStatus: snapshot.status ?? "<missing>",
+        renderedStatus: rendered.status ?? "<missing>",
+      },
+    });
+    if (!renderedSuccessful) return;
+  }
+
+  const hydrated = rendered.content;
+  if (
+    raw !== undefined &&
+    hydrated !== undefined &&
+    raw.characters < 80 &&
+    hydrated.characters >= Math.max(200, raw.characters * 3)
+  ) {
+    pushFinding(findings, {
+      code: "client-only-content",
+      severity: "error",
+      url: route.url,
+      message: "Most visible page content appears only after JavaScript runs.",
+      evidence: {
+        ssrCharacters: raw.characters,
+        renderedCharacters: hydrated.characters,
+        ssrWords: raw.words,
+        renderedWords: hydrated.words,
+      },
+    });
+  }
+  if (snapshot.signals.titles.length === 0 && rendered.signals.titles.length > 0) {
+    pushFinding(findings, {
+      code: "rendered-only-title",
+      severity: "error",
+      url: route.url,
+      message:
+        "The title appears only after JavaScript runs and is absent from the server response.",
+    });
+  }
+  if (snapshot.signals.canonicals.length === 0 && rendered.signals.canonicals.length > 0) {
+    pushFinding(findings, {
+      code: "rendered-only-canonical",
+      severity: "error",
+      url: route.url,
+      message: "The canonical link appears only after JavaScript runs.",
+    });
+  }
+  if (snapshot.signals.h1s.length === 0 && rendered.signals.h1s.length > 0) {
+    pushFinding(findings, {
+      code: "rendered-only-h1",
+      severity: "warning",
+      url: route.url,
+      message: "The primary heading appears only after JavaScript runs.",
     });
   }
 }
@@ -536,17 +700,18 @@ function checkGraph(input: AuditInput, findings: Finding[]): void {
   const baseOrigin = new URL(input.baseUrl).origin;
 
   for (const route of input.routes) {
+    const routeOptions = optionsForRoute(input.options, route.url);
     const snapshot = primarySnapshot(route);
     const indexability = getIndexability(route);
     const canonical = canonicalUrl(route);
 
-    if (route.depth >= 0 && route.depth > input.options.maxDepth && indexability === "indexable") {
+    if (route.depth >= 0 && route.depth > routeOptions.maxDepth && indexability === "indexable") {
       pushFinding(findings, {
         code: "deep-route",
         severity: "warning",
         url: route.url,
         message: `The shortest discovered path is ${route.depth} clicks deep.`,
-        evidence: { depth: route.depth, recommendedMax: input.options.maxDepth },
+        evidence: { depth: route.depth, recommendedMax: routeOptions.maxDepth },
       });
     }
 
@@ -574,7 +739,7 @@ function checkGraph(input: AuditInput, findings: Finding[]): void {
     }
 
     if (
-      input.options.requireSitemapCoverage &&
+      routeOptions.requireSitemapCoverage &&
       indexability === "indexable" &&
       route.sitemap === undefined
     ) {
@@ -774,6 +939,7 @@ function checkDuplicates(routes: readonly RouteNode[], findings: Finding[]): voi
   const canonicalGroups = new Map<string, string[]>();
   const titleGroups = new Map<string, string[]>();
   const descriptionGroups = new Map<string, string[]>();
+  const contentGroups = new Map<string, string[]>();
 
   for (const route of routes) {
     if (getIndexability(route) !== "indexable") continue;
@@ -797,6 +963,11 @@ function checkDuplicates(routes: readonly RouteNode[], findings: Finding[]): voi
       const list = descriptionGroups.get(key) ?? [];
       list.push(route.url);
       descriptionGroups.set(key, list);
+    }
+    if ((snapshot?.content?.words ?? 0) >= 20 && snapshot?.content?.sha256 !== undefined) {
+      const list = contentGroups.get(snapshot.content.sha256) ?? [];
+      list.push(route.url);
+      contentGroups.set(snapshot.content.sha256, list);
     }
   }
 
@@ -833,6 +1004,11 @@ function checkDuplicates(routes: readonly RouteNode[], findings: Finding[]): voi
     "duplicate-description-across-routes",
     "Multiple indexable routes use the same meta description.",
   );
+  reportGroups(
+    contentGroups,
+    "duplicate-content-across-routes",
+    "Multiple indexable routes return the same normalized server-rendered body text.",
+  );
 
   const variants = new Map<string, string[]>();
   for (const route of routes) {
@@ -848,6 +1024,85 @@ function checkDuplicates(routes: readonly RouteNode[], findings: Finding[]): voi
     "route-case-or-slash-variant",
     "Several discovered URLs differ only by case or a trailing slash.",
   );
+}
+
+function isSuccessfulHtml(snapshot: PageSnapshot | undefined): snapshot is PageSnapshot {
+  return (
+    snapshot !== undefined &&
+    snapshot.completion === "complete" &&
+    snapshot.status !== undefined &&
+    snapshot.status >= 200 &&
+    snapshot.status < 300 &&
+    snapshot.redirects.length === 0 &&
+    (snapshot.contentType === undefined ||
+      /^(text\/html|application\/xhtml\+xml)\b/i.test(snapshot.contentType))
+  );
+}
+
+function checkSoft404s(routes: readonly RouteNode[], findings: Finding[]): void {
+  const references = routes
+    .map((route) => ({ route, snapshot: primarySnapshot(route) }))
+    .filter(
+      (entry): entry is { route: RouteNode; snapshot: PageSnapshot } =>
+        entry.snapshot !== undefined &&
+        entry.snapshot.completion === "complete" &&
+        (entry.snapshot.status === 404 || entry.snapshot.status === 410) &&
+        entry.snapshot.content !== undefined,
+    );
+
+  for (const route of routes) {
+    const snapshot = primarySnapshot(route);
+    if (!isSuccessfulHtml(snapshot)) continue;
+    const content = snapshot.content;
+    if (content !== undefined && content.words >= 8) {
+      const matched = references.find(({ snapshot: reference }) => {
+        const other = reference.content;
+        if (other === undefined || other.words < 8) return false;
+        if (content.sha256 === other.sha256) return true;
+        const ratio = content.characters / Math.max(1, other.characters);
+        const distance = simhashDistance(content.simhash, other.simhash);
+        return content.words >= 15 && ratio >= 0.75 && ratio <= 1.25 && (distance ?? 65) <= 3;
+      });
+      if (matched !== undefined) {
+        const reference = matched.snapshot.content;
+        const exact = reference !== undefined && content.sha256 === reference.sha256;
+        pushFinding(findings, {
+          code: exact ? "soft-404" : "possible-soft-404",
+          severity: exact ? "error" : "warning",
+          url: route.url,
+          relatedUrls: [matched.route.url],
+          message: exact
+            ? "This successful response exactly matches a captured 404 or 410 page."
+            : "This successful response is a near-duplicate of a captured 404 or 410 page.",
+          evidence: {
+            status: snapshot.status ?? 200,
+            referenceStatus: matched.snapshot.status ?? 404,
+            simhashDistance:
+              reference === undefined
+                ? -1
+                : (simhashDistance(content.simhash, reference.simhash) ?? -1),
+          },
+        });
+        continue;
+      }
+    }
+
+    const heading = [snapshot.signals.titles[0]?.value, snapshot.signals.h1s[0]?.value]
+      .filter((value): value is string => value !== undefined)
+      .join(" ");
+    if (
+      (snapshot.content?.characters ?? 0) <= 2_000 &&
+      /(?:^|\b)(?:404|page not found|not found|does not exist)(?:\b|$)/i.test(heading)
+    ) {
+      pushFinding(findings, {
+        code: "possible-soft-404",
+        severity: "warning",
+        url: route.url,
+        message: "This successful response uses a title or H1 that looks like a not-found page.",
+        evidence: { status: snapshot.status ?? 200 },
+      });
+    }
+  }
 }
 
 function addInventoryFindings(input: AuditInput, findings: Finding[]): void {
@@ -927,7 +1182,8 @@ export function auditSite(input: AuditInput): AuditOutput {
   }
   checkGraph(input, findings);
   checkDuplicates(input.routes, findings);
-  const deduplicated = deduplicateFindings(findings);
+  checkSoft404s(input.routes, findings);
+  const deduplicated = deduplicateFindings(applySeverityConfiguration(findings, input.options));
   return { findings: deduplicated, summary: summarize(input.routes, deduplicated) };
 }
 

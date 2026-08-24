@@ -17,7 +17,9 @@ routelint check https://example.com --format html -o report.html
 
 Reports include `schemaVersion`, `toolVersion`, and `generatedAt`. Object keys and route/finding order are deterministic for the same evidence. Timing values and generation dates naturally differ.
 
-Request headers are excluded. Response headers are allowlisted/redacted by the capture layer. URLs can still reveal private route names, so treat preview reports as potentially sensitive.
+Schema 2 adds text-free SSR body measurements and fingerprints, optional rendered snapshots, URL-list inventory, changed-only comparison metadata, and the effective crawl policy needed to reject misleading changed-only comparisons. The baseline reader accepts both schema 1 and schema 2 reports.
+
+Request-header values are excluded. Schema 2 records only the normalized names of configured request headers so changed-only mode can detect a changed authentication mechanism without storing credentials. Response headers are allowlisted/redacted by the capture layer. URLs can still reveal private route names, so treat preview reports as potentially sensitive.
 
 ## Baseline comparison
 
@@ -39,3 +41,21 @@ The diff covers:
 - added, resolved, and severity-changed findings.
 
 Baseline comparison describes observed change. It does not prove that an omitted route was deleted when either crawl was truncated; keep page/depth/robots/query settings stable between runs.
+
+## Changed-only audit output
+
+Use a stored JSON report as a CI baseline while still running the complete current audit:
+
+```bash
+routelint check https://example.com \
+  --changed-only baseline.json \
+  --format json \
+  --output changed.json \
+  --fail-on warning
+```
+
+The output keeps the current route evidence but filters `findings` to entries that are new or more severe than the same finding in the baseline. Its summary counts are recalculated from that filtered set. The `comparison` object records new, worsened, resolved, and unchanged counts. Resolved and unchanged findings are counted but omitted from the finding list.
+
+Finding identity uses code, route, and related routes. A message-only change does not make an existing finding new.
+
+Changed-only mode rejects incomplete runs and a baseline whose recorded evidence policy differs from the current run. The policy covers the base URL; page/depth/request limits; seed, sitemap, URL-list, include, and exclude inputs; query and robots handling; ordered agents; configured request-header names; rendered capture settings; and audit rules. Schema 1 reports remain readable, but a report without a recorded policy field cannot be assumed comparable to a current report that has it.

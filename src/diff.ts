@@ -72,6 +72,12 @@ const pageSignalsSchema = z.object({
   htmlLang: z.string().optional(),
   baseHref: z.string().optional(),
 });
+const pageContentEvidenceSchema = z.object({
+  characters: nonNegativeIntegerSchema,
+  words: nonNegativeIntegerSchema,
+  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  simhash: z.string().regex(/^[a-f0-9]{16}$/i),
+});
 const redirectHopSchema = z.object({
   url: httpUrlSchema,
   status: nonNegativeIntegerSchema,
@@ -89,6 +95,7 @@ const snapshotSchema = z.object({
   signals: pageSignalsSchema,
   bytesRead: nonNegativeIntegerSchema,
   bodySha256: z.string().optional(),
+  content: pageContentEvidenceSchema.optional(),
   durationMs: nonNegativeNumberSchema,
   completion: z.enum([
     "complete",
@@ -101,9 +108,20 @@ const snapshotSchema = z.object({
   error: z.string().optional(),
 });
 const routeSourceSchema = z.object({
-  kind: z.enum(["seed", "sitemap", "internal-link", "next-build", "sample"]),
+  kind: z.enum(["seed", "sitemap", "internal-link", "next-build", "sample", "url-list"]),
   from: z.string().optional(),
   detail: z.string().optional(),
+});
+const renderedSnapshotSchema = z.object({
+  requestedUrl: httpUrlSchema,
+  finalUrl: httpUrlSchema,
+  status: nonNegativeIntegerSchema.optional(),
+  completion: z.enum(["complete", "timeout", "navigation-error", "capture-error"]),
+  signals: pageSignalsSchema,
+  content: pageContentEvidenceSchema.optional(),
+  htmlBytes: nonNegativeIntegerSchema,
+  durationMs: nonNegativeNumberSchema,
+  error: z.string().optional(),
 });
 const buildRouteSchema = z.object({
   pathname: z.string(),
@@ -130,6 +148,7 @@ const routeNodeSchema = z.object({
   sitemap: sitemapEntrySchema.optional(),
   build: buildRouteSchema.optional(),
   snapshots: z.array(snapshotSchema),
+  rendered: renderedSnapshotSchema.optional(),
   inbound: z.array(httpUrlSchema),
   outbound: z.array(httpUrlSchema),
 });
@@ -201,8 +220,33 @@ const summarySchema = z.object({
   noindex: nonNegativeIntegerSchema,
   maxDepth: nonNegativeIntegerSchema,
 });
+const ruleSeveritySchema = z.enum(["error", "warning", "info", "off"]);
+const reportAuditSchema = z.object({
+  requireTitle: z.boolean(),
+  requireDescription: z.boolean(),
+  requireCanonical: z.boolean(),
+  requireH1: z.boolean(),
+  requireSitemapCoverage: z.boolean(),
+  maxDepth: nonNegativeIntegerSchema,
+  severities: z.record(z.string(), ruleSeveritySchema).optional(),
+  paths: z
+    .array(
+      z.object({
+        include: z.array(z.string()),
+        exclude: z.array(z.string()),
+        requireTitle: z.boolean().optional(),
+        requireDescription: z.boolean().optional(),
+        requireCanonical: z.boolean().optional(),
+        requireH1: z.boolean().optional(),
+        requireSitemapCoverage: z.boolean().optional(),
+        maxDepth: nonNegativeIntegerSchema.optional(),
+        severities: z.record(z.string(), ruleSeveritySchema).optional(),
+      }),
+    )
+    .optional(),
+});
 const routeLintReportSchema = z.object({
-  schemaVersion: z.literal("1"),
+  schemaVersion: z.enum(["1", "2"]),
   toolVersion: z.string().min(1),
   generatedAt: z.iso.datetime(),
   durationMs: nonNegativeNumberSchema,
@@ -213,7 +257,29 @@ const routeLintReportSchema = z.object({
     agents: z.array(z.string().min(1)).min(1),
     respectRobots: z.boolean(),
     queryPolicy: z.enum(["drop", "keep"]),
+    seeds: z.array(httpUrlSchema).optional(),
+    sitemapMode: z.enum(["auto", "explicit"]).optional(),
+    sitemapUrls: z.array(httpUrlSchema).optional(),
+    include: z.array(z.string()).optional(),
+    exclude: z.array(z.string()).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+    maxBytes: z.number().int().positive().optional(),
+    maxRedirects: nonNegativeIntegerSchema.optional(),
+    rendered: z.boolean().optional(),
+    renderedConcurrency: z.number().int().positive().optional(),
+    renderedTimeoutMs: z.number().int().positive().optional(),
+    renderedSettleMs: nonNegativeIntegerSchema.optional(),
+    headerNames: z.array(z.string().min(1)).optional(),
+    urlListFiles: nonNegativeIntegerSchema.optional(),
+    audit: reportAuditSchema.optional(),
   }),
+  inputs: z
+    .object({
+      urlListFiles: nonNegativeIntegerSchema,
+      urlListUrls: nonNegativeIntegerSchema,
+      warnings: z.array(z.string()),
+    })
+    .optional(),
   build: buildInventorySchema.optional(),
   sitemap: sitemapInventorySchema,
   robots: robotsFileSchema.optional(),
@@ -221,6 +287,16 @@ const routeLintReportSchema = z.object({
   findings: z.array(findingSchema),
   summary: summarySchema,
   truncated: z.boolean(),
+  comparison: z
+    .object({
+      mode: z.literal("changed-only"),
+      baselineGeneratedAt: z.iso.datetime(),
+      newFindings: nonNegativeIntegerSchema,
+      worsenedFindings: nonNegativeIntegerSchema,
+      resolvedFindings: nonNegativeIntegerSchema,
+      unchangedFindings: nonNegativeIntegerSchema,
+    })
+    .optional(),
 });
 
 export function parseRouteLintReport(value: unknown): RouteLintReport {
