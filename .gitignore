@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.tgz
+*.zip
+routelint-report.*
+.DS_Store
+.env
+.env.*
+!.env.example

@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose a focused route or technical-SEO check.
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What failure is hard to catch today?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and expected result
+      description: Show the HTTP/HTML/build evidence and the finding RouteLint should produce.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and false-positive risks

@@ -1,0 +1,35 @@
+name: RouteLint site check
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Deployed site URL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ROUTELINT_BASE_URL: ${{ inputs.base_url }}
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Check deployed routes
+        run: >-
+          npx --yes routelint@0.1.0 check "$ROUTELINT_BASE_URL"
+          --format html
+          --output routelint-report.html
+          --fail-on error
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: routelint-report
+          path: routelint-report.html
+          if-no-files-found: error
