@@ -17,9 +17,11 @@ routelint check https://example.com --format html -o report.html
 
 Reports include `schemaVersion`, `toolVersion`, and `generatedAt`. Object keys and route/finding order are deterministic for the same evidence. Timing values and generation dates naturally differ.
 
-Schema 2 adds text-free SSR body measurements and fingerprints, optional rendered snapshots, URL-list inventory, changed-only comparison metadata, and the effective crawl policy needed to reject misleading changed-only comparisons. The baseline reader accepts both schema 1 and schema 2 reports.
+Schema 2 adds text-free SSR body measurements and fingerprints, optional rendered snapshots, URL-list inventory, changed-only comparison metadata, and the effective crawl policy needed to reject misleading changed-only comparisons. Schema 3 adds configured redirect policy and structured redirect-contract checks. The report reader accepts schemas 1, 2, and 3.
 
 Request-header values are excluded. Schema 2 records only the normalized names of configured request headers so changed-only mode can detect a changed authentication mechanism without storing credentials. Response headers are allowlisted/redacted by the capture layer. URLs can still reveal private route names, so treat preview reports as potentially sensitive.
+
+Schema 3 reports expose redirect checks under `redirectContracts`. Each check records the normalized contract, source (`config` or `next-build`), collection completion, observed hops, final status and URL, target indexability, outcome, and contract finding codes. Terminal output summarizes the outcomes, HTML adds a contract table, and SARIF contains failed or unchecked contract findings.
 
 ## Baseline comparison
 
@@ -58,4 +60,4 @@ The output keeps the current route evidence but filters `findings` to entries th
 
 Finding identity uses code, route, and related routes. A message-only change does not make an existing finding new.
 
-Changed-only mode rejects incomplete runs and a baseline whose recorded evidence policy differs from the current run. The policy covers the base URL; page/depth/request limits; seed, sitemap, URL-list, include, and exclude inputs; query and robots handling; ordered agents; configured request-header names; rendered capture settings; and audit rules. Schema 1 reports remain readable, but a report without a recorded policy field cannot be assumed comparable to a current report that has it.
+Changed-only mode rejects incomplete runs and a baseline whose recorded evidence policy differs from the current run. The policy covers the base URL; page/depth/request limits; seed, sitemap, URL-list, redirect-contract, include, and exclude inputs; query and robots handling; ordered agents; configured request-header names; rendered capture settings; and audit rules. Schema 1 reports remain readable, but a report without a recorded policy field cannot be assumed comparable to a current report that has it.

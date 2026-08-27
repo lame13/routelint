@@ -343,7 +343,10 @@ function collectRoutesManifest(
         : redirect.permanent === true
           ? 308
           : 307;
-    redirects.push({ source, destination, status });
+    const conditional =
+      (Array.isArray(redirect.has) && redirect.has.length > 0) ||
+      (Array.isArray(redirect.missing) && redirect.missing.length > 0);
+    redirects.push({ source, destination, status, ...(conditional ? { conditional: true } : {}) });
   }
 }
 

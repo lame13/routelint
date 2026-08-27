@@ -23,7 +23,7 @@ When present, RouteLint reads these known build artifacts under `.next` (or the 
 
 It also reads the locally installed `next/package.json` version when available. Files are size-limited and parsed as untrusted JSON.
 
-Concrete static, prerendered, and ISR routes become crawl candidates. Next redirects are retained as build evidence. Internal framework routes, Pages Router API routes, App Router route handlers, error documents, and unresolved patterns are not treated as public pages. Next's standard metadata routes, such as `robots.txt`, `sitemap.xml`, and `manifest.webmanifest`, remain discoverable.
+Concrete static, prerendered, and ISR routes become crawl candidates. Exact, unconditional, query-free, same-origin redirects become live redirect contracts; other redirects remain build evidence only. Internal framework routes, Pages Router API routes, App Router route handlers, error documents, and unresolved patterns are not treated as public pages. Next's standard metadata routes, such as `robots.txt`, `sitemap.xml`, and `manifest.webmanifest`, remain discoverable.
 
 ## Dynamic routes
 
@@ -67,3 +67,5 @@ Partially prerendered/PPR evidence stays `unknown` when the manifest cannot prov
 Next.js build manifests are known artifacts, not a stable public integration API. RouteLint handles missing fields and files without crashing and reports compatibility warnings. The live HTTP response remains the source of truth for status, redirects, HTML metadata, links, and indexability.
 
 The configured Next.js `basePath` is applied to public build paths before they enter the crawl graph.
+
+RouteLint does not emulate dynamic parameters, header or cookie conditions, query rewrites, or cross-origin destinations from a private manifest format. Add an exact configured contract for each deployed URL that must be verified. See [REDIRECTS.md](REDIRECTS.md).

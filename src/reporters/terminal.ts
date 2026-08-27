@@ -162,6 +162,21 @@ export function renderTerminalReport(
       lines.push(`  URL-list warning: ${terminalText(warning)}`);
     }
   }
+  if (
+    (report.redirectContracts?.declared ?? 0) > 0 ||
+    (report.redirectContracts?.skippedBuildRedirects ?? 0) > 0
+  ) {
+    const contracts = report.redirectContracts;
+    if (contracts !== undefined) {
+      const skipped =
+        contracts.skippedBuildRedirects === 0
+          ? ""
+          : `, ${contracts.skippedBuildRedirects} Next.js definitions outside contract scope`;
+      lines.push(
+        `Redirect contracts: ${contracts.verified}/${contracts.declared} verified, ${contracts.failed} failed, ${contracts.unchecked} unchecked${skipped}`,
+      );
+    }
+  }
   lines.push(
     [
       paint(`${report.summary.errors} errors`, ANSI.red, color),

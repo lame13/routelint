@@ -20,6 +20,13 @@ const SEVERITY_ORDER: Readonly<Record<Severity, number>> = {
 };
 
 const severitySchema = z.enum(["error", "warning", "info"]);
+const redirectStatusSchema = z.union([
+  z.literal(301),
+  z.literal(302),
+  z.literal(303),
+  z.literal(307),
+  z.literal(308),
+]);
 const httpUrlSchema = z.string().refine((value) => {
   try {
     const url = new URL(value);
@@ -108,7 +115,15 @@ const snapshotSchema = z.object({
   error: z.string().optional(),
 });
 const routeSourceSchema = z.object({
-  kind: z.enum(["seed", "sitemap", "internal-link", "next-build", "sample", "url-list"]),
+  kind: z.enum([
+    "seed",
+    "sitemap",
+    "internal-link",
+    "next-build",
+    "sample",
+    "url-list",
+    "redirect-contract",
+  ]),
   from: z.string().optional(),
   detail: z.string().optional(),
 });
@@ -134,6 +149,45 @@ const buildRedirectSchema = z.object({
   source: z.string(),
   destination: z.string(),
   status: nonNegativeIntegerSchema,
+  conditional: z.boolean().optional(),
+});
+const redirectExpectationSchema = z.object({
+  from: httpUrlSchema,
+  to: httpUrlSchema,
+  status: redirectStatusSchema,
+  maxHops: z.number().int().positive(),
+});
+const redirectContractSchema = redirectExpectationSchema.extend({
+  source: z.enum(["config", "next-build"]),
+});
+const redirectContractReportSchema = z.object({
+  declared: nonNegativeIntegerSchema,
+  verified: nonNegativeIntegerSchema,
+  failed: nonNegativeIntegerSchema,
+  unchecked: nonNegativeIntegerSchema,
+  skippedBuildRedirects: nonNegativeIntegerSchema,
+  checks: z.array(
+    z.object({
+      contract: redirectContractSchema,
+      observed: z.object({
+        completion: z.enum([
+          "complete",
+          "max-bytes-exceeded",
+          "timeout",
+          "network-error",
+          "invalid-response",
+          "robots-blocked",
+          "not-fetched",
+        ]),
+        hops: z.array(redirectHopSchema),
+        finalUrl: httpUrlSchema.optional(),
+        finalStatus: nonNegativeIntegerSchema.optional(),
+        targetIndexability: z.enum(["indexable", "noindex", "unknown"]),
+      }),
+      outcome: z.enum(["verified", "failed", "unchecked"]),
+      findingCodes: z.array(z.string().min(1)),
+    }),
+  ),
 });
 const sitemapEntrySchema = z.object({
   url: httpUrlSchema,
@@ -246,7 +300,7 @@ const reportAuditSchema = z.object({
     .optional(),
 });
 const routeLintReportSchema = z.object({
-  schemaVersion: z.enum(["1", "2"]),
+  schemaVersion: z.enum(["1", "2", "3"]),
   toolVersion: z.string().min(1),
   generatedAt: z.iso.datetime(),
   durationMs: nonNegativeNumberSchema,
@@ -271,6 +325,7 @@ const routeLintReportSchema = z.object({
     renderedSettleMs: nonNegativeIntegerSchema.optional(),
     headerNames: z.array(z.string().min(1)).optional(),
     urlListFiles: nonNegativeIntegerSchema.optional(),
+    redirects: z.array(redirectExpectationSchema).optional(),
     audit: reportAuditSchema.optional(),
   }),
   inputs: z
@@ -281,6 +336,7 @@ const routeLintReportSchema = z.object({
     })
     .optional(),
   build: buildInventorySchema.optional(),
+  redirectContracts: redirectContractReportSchema.optional(),
   sitemap: sitemapInventorySchema,
   robots: robotsFileSchema.optional(),
   routes: z.array(routeNodeSchema),

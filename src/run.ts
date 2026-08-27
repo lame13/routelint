@@ -9,6 +9,7 @@ import { fetchRobots } from "./discovery/robots.js";
 import { fetchSitemaps } from "./discovery/sitemap.js";
 import { loadUrlLists, type UrlListInventory } from "./discovery/url-list.js";
 import { redactReport } from "./redact.js";
+import { collectRedirectContracts, redirectContractCandidates } from "./redirects.js";
 import { captureRenderedPages } from "./rendered.js";
 import type {
   BuildInventory,
@@ -152,10 +153,19 @@ export async function runRouteLint(config: RouteLintConfig): Promise<RouteLintRe
     initial.warnings.length === 0
       ? sitemap
       : { ...sitemap, warnings: [...sitemap.warnings, ...initial.warnings] };
+  const redirectCollection = collectRedirectContracts(
+    config.redirects ?? [],
+    build,
+    config.baseUrl,
+  );
 
   const candidates = mergeRouteCandidates(
     config.baseUrl,
-    [...initial.candidates, ...urlListCandidates(urlLists)],
+    [
+      ...initial.candidates,
+      ...urlListCandidates(urlLists),
+      ...redirectContractCandidates(redirectCollection.contracts),
+    ],
     config.queryPolicy,
   );
   const crawled = await crawlSite({
@@ -179,6 +189,8 @@ export async function runRouteLint(config: RouteLintConfig): Promise<RouteLintRe
     sitemap: effectiveSitemap,
     robots,
     ...(build === undefined ? {} : { build }),
+    redirectContracts: redirectCollection.contracts,
+    skippedBuildRedirects: redirectCollection.skippedBuildRedirects,
     options: config.audit,
     truncated: crawled.truncated,
   });
@@ -213,10 +225,12 @@ export async function runRouteLint(config: RouteLintConfig): Promise<RouteLintRe
           }),
       headerNames: configuredHeaderNames(config.headers),
       urlListFiles: config.urlFiles?.length ?? 0,
+      ...((config.redirects?.length ?? 0) === 0 ? {} : { redirects: config.redirects }),
       audit: config.audit,
     },
     inputs: urlListInputs(urlLists),
     ...(build === undefined ? {} : { build }),
+    redirectContracts: audit.redirectContracts,
     sitemap: effectiveSitemap,
     robots,
     routes,

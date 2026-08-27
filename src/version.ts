@@ -1,2 +1,2 @@
-export const VERSION = "0.2.0";
-export const REPORT_SCHEMA_VERSION = "2";
+export const VERSION = "0.3.0";
+export const REPORT_SCHEMA_VERSION = "3";

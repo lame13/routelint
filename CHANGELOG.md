@@ -2,6 +2,20 @@
 
 All notable changes are documented here. This project follows semantic versioning.
 
+## 0.3.0 - 2026-08-27
+
+### Added
+
+- Exact same-origin redirect contracts with first-hop status, final destination, hop-limit, target-status, and target-indexability checks.
+- Automatic live validation for concrete, unconditional, query-free, same-origin redirects found in supported Next.js build manifests.
+- Structured redirect-contract results in JSON, a dedicated HTML table, terminal outcome totals, SARIF findings, and public TypeScript APIs.
+
+### Changed
+
+- JSON report schema is now version 3. The report reader and diff command remain compatible with schemas 1 and 2.
+- Correctly declared redirect sources no longer produce the generic `redirected-route` or ordinary page-response findings; sitemap and internal-link findings still apply.
+- Configured redirect contracts participate in changed-only baseline comparability.
+
 ## 0.2.0 - 2026-08-24
 
 ### Added

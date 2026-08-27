@@ -1,4 +1,4 @@
-# Publish RouteLint 0.2.0 from your Mac
+# Publish RouteLint 0.3.0 from your Mac
 
 This repository intentionally has no npm publish workflow. GitHub Actions tests and packs the project, but every npm publication is run interactively from your terminal and requires your npm account's two-factor authentication.
 
@@ -41,7 +41,7 @@ git init -b main
 git status --short
 git add .
 git diff --cached --check
-git commit -m "Release RouteLint 0.2.0"
+git commit -m "Release RouteLint 0.3.0"
 ```
 
 Create and push the public repository:
@@ -62,7 +62,7 @@ For an existing Git checkout that already has the correct `origin`, commit norma
 git status --short
 git add .
 git diff --cached --check
-git commit -m "Release RouteLint 0.2.0"
+git commit -m "Release RouteLint 0.3.0"
 git push origin main
 ```
 
@@ -101,7 +101,7 @@ gh run watch --repo lame13/routelint --exit-status
 
 The CI workflow has no Docker job and no npm publishing job. It runs Node 22.12 and 24 tests on Linux plus installed-package smoke tests on macOS and Windows. Connecting an npm package to GitHub later does not require adding a publish job.
 
-## 3. Publish 0.2.0 interactively
+## 3. Publish 0.3.0 interactively
 
 Sign in through npm's interactive web flow, confirm the account, and inspect its 2FA mode:
 
@@ -112,14 +112,14 @@ npm profile get
 npm view routelint version dist-tags repository.url
 ```
 
-`npm profile get` must show `two-factor auth: auth-and-writes`. If it does not, stop and enable account 2FA before publishing. npm's interactive flow uses a security key or passkey. Confirm that the registry shows the expected prior RouteLint version. `E404` is acceptable only if 0.2.0 will be the first publication.
+`npm profile get` must show `two-factor auth: auth-and-writes`. If it does not, stop and enable account 2FA before publishing. npm's interactive flow uses a security key or passkey. Confirm that the registry still shows RouteLint 0.2.0 before publishing.
 
 Verify the release identity before doing anything irreversible:
 
 ```bash
 node -p "require('./package.json').version"
 npm pkg get name version repository homepage
-test "$(node -p "require('./package.json').version")" = "0.2.0"
+test "$(node -p "require('./package.json').version")" = "0.3.0"
 ```
 
 Run the complete release gate again:
@@ -144,7 +144,7 @@ Verify the registry result:
 
 ```bash
 npm view routelint version dist-tags repository.url engines
-npx --yes routelint@0.2.0 --version
+npx --yes routelint@0.3.0 --version
 ```
 
 npm requires 2FA or a granular token that bypasses it for publishing. This project deliberately uses neither a token nor automated publication. Open `https://www.npmjs.com/package/routelint/access`, choose **Require two-factor authentication and disallow tokens (Recommended)** under Publishing access, and save it with the interactive 2FA challenge.
@@ -155,13 +155,13 @@ npm requires 2FA or a granular token that bypasses it for publishing. This proje
 ## 4. Create the matching source release
 
 ```bash
-git tag -a v0.2.0 -m "RouteLint v0.2.0"
-git push origin v0.2.0
-gh release create v0.2.0 \
+git tag -a v0.3.0 -m "RouteLint v0.3.0"
+git push origin v0.3.0
+gh release create v0.3.0 \
   --verify-tag \
   --generate-notes \
   --latest \
-  --title "RouteLint v0.2.0"
+  --title "RouteLint v0.3.0"
 ```
 
 Keep future releases interactive: bump the version and changelog, rerun the release gate, publish from a real terminal with its 2FA prompt, then push the matching annotated Git tag and GitHub release. Do not add an npm publishing workflow or a bypass-2FA token without deliberately changing this release policy.

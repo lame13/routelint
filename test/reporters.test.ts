@@ -51,8 +51,8 @@ function snapshot(overrides: Partial<PageSnapshot> = {}, omitStatus = false): Pa
 
 function fixture(): RouteLintReport {
   return {
-    schemaVersion: "1",
-    toolVersion: "0.1.0",
+    schemaVersion: "3",
+    toolVersion: "0.3.0",
     generatedAt: "2026-08-22T00:00:00.000Z",
     durationMs: 1_234,
     baseUrl: "https://example.com/",
@@ -81,6 +81,40 @@ function fixture(): RouteLintReport {
       groups: [],
       sitemaps: ["https://example.com/sitemap.xml"],
       warnings: [],
+    },
+    redirectContracts: {
+      declared: 1,
+      verified: 1,
+      failed: 0,
+      unchecked: 0,
+      skippedBuildRedirects: 2,
+      checks: [
+        {
+          contract: {
+            from: "https://example.com/old",
+            to: "https://example.com/new",
+            status: 301,
+            maxHops: 1,
+            source: "config",
+          },
+          observed: {
+            completion: "complete",
+            hops: [
+              {
+                url: "https://example.com/old",
+                status: 301,
+                location: "https://example.com/new",
+                durationMs: 4,
+              },
+            ],
+            finalUrl: "https://example.com/new",
+            finalStatus: 200,
+            targetIndexability: "indexable",
+          },
+          outcome: "verified",
+          findingCodes: [],
+        },
+      ],
     },
     routes: [
       {
@@ -157,6 +191,9 @@ describe("terminal reporter", () => {
     expect(output).toContain("Site report\nhttps://example.com/");
     expect(output).toContain("INCOMPLETE EVIDENCE");
     expect(output).toContain("LINK_BROKEN");
+    expect(output).toContain(
+      "Redirect contracts: 1/1 verified, 0 failed, 0 unchecked, 2 Next.js definitions outside contract scope",
+    );
     expect(output.indexOf("LINK_BROKEN")).toBeLessThan(output.indexOf("CANONICAL_MISSING"));
     expect(output).not.toContain("\u001b[");
   });
@@ -201,6 +238,39 @@ describe("SARIF reporter", () => {
       "https://example.com/",
     );
   });
+
+  it("exports redirect contract failures as ordinary code-scanning results", () => {
+    const report = fixture();
+    const parsed = JSON.parse(
+      renderSarifReport({
+        ...report,
+        findings: [
+          ...report.findings,
+          {
+            code: "redirect-target-mismatch",
+            severity: "error",
+            message: "The redirect ended at the wrong destination.",
+            url: "https://example.com/old",
+            relatedUrls: ["https://example.com/new"],
+          },
+        ],
+      }),
+    );
+
+    expect(
+      parsed.runs[0].tool.driver.rules.some(
+        (rule: { id: string }) => rule.id === "redirect-target-mismatch",
+      ),
+    ).toBe(true);
+    expect(
+      parsed.runs[0].results.find(
+        (result: { ruleId: string }) => result.ruleId === "redirect-target-mismatch",
+      ),
+    ).toMatchObject({
+      level: "error",
+      locations: [{ physicalLocation: { artifactLocation: { uri: "https://example.com/old" } } }],
+    });
+  });
 });
 
 describe("HTML reporter", () => {
@@ -217,6 +287,12 @@ describe("HTML reporter", () => {
     expect(output).toContain("Site checker: 200 · Browser: 200");
     expect(output).toContain("Site checker: indexable · Browser: indexable");
     expect(output).toContain("Agent response differences");
+    expect(output).toContain("Redirect contracts");
+    expect(output).toContain("1 of 1 contracts verified");
+    expect(output).toContain("https://example.com/old");
+    expect(output).toContain("https://example.com/new");
+    expect(output).toContain("badge-verified");
+    expect(output).toContain("2 Next.js definitions were outside contract scope");
     expect(output).toContain("No response differences were found between configured agents");
     expect(output).toContain("Rendered evidence");
     expect(output).toContain('label for="route-search"');
@@ -226,6 +302,19 @@ describe("HTML reporter", () => {
     expect(output).not.toMatch(/<link\b/i);
     expect(output).not.toMatch(/@(?:import|font-face)/i);
     expect(output.toLowerCase()).not.toContain("seo score");
+  });
+
+  it("omits the Next.js scope note when no build redirects were skipped", () => {
+    const report = fixture();
+    const contracts = report.redirectContracts;
+    if (contracts === undefined) throw new Error("Fixture requires redirect contracts.");
+
+    const output = renderHtmlReport({
+      ...report,
+      redirectContracts: { ...contracts, skippedBuildRedirects: 0 },
+    });
+
+    expect(output).not.toContain("0 Next.js definitions");
   });
 
   it("states when findings have been filtered against a baseline", () => {

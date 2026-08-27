@@ -51,6 +51,15 @@ export { emptyPageSignals, parseHtml, parseXRobotsTag } from "./html-parser.js";
 export { capturePage, captureUrl, isHtmlContentType } from "./http.js";
 export { redactReport } from "./redact.js";
 export type {
+  RedirectContractAudit,
+  RedirectContractCollection,
+} from "./redirects.js";
+export {
+  auditRedirectContracts,
+  collectRedirectContracts,
+  redirectContractCandidates,
+} from "./redirects.js";
+export type {
   RenderedCaptureDependencies,
   RenderedCaptureOptions,
 } from "./rendered.js";
@@ -91,7 +100,16 @@ export type {
   PageSnapshot,
   PathAuditOptions,
   QueryPolicy,
+  RedirectContract,
+  RedirectContractCheck,
+  RedirectContractObservation,
+  RedirectContractOutcome,
+  RedirectContractReport,
+  RedirectContractSource,
+  RedirectExpectation,
   RedirectHop,
+  RedirectStatus,
+  RedirectTargetIndexability,
   RenderedCompletion,
   RenderedOptions,
   RenderedPageSnapshot,

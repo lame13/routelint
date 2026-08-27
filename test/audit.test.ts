@@ -277,6 +277,65 @@ function codesFor(input: AuditInput, url?: string): string[] {
     .map((finding) => finding.code);
 }
 
+describe("redirect contract integration", () => {
+  it("replaces the generic route warning with contract-specific results", () => {
+    const redirected = route("/old", {
+      page: snapshot("/old", {
+        finalUrl: absolute("/new"),
+        redirects: [
+          {
+            url: absolute("/old"),
+            status: 301,
+            location: absolute("/new"),
+            durationMs: 1,
+          },
+        ],
+      }),
+    });
+    const output = auditSite(
+      auditInput([redirected], {
+        redirectContracts: [
+          {
+            from: absolute("/old"),
+            to: absolute("/new"),
+            status: 301,
+            maxHops: 1,
+            source: "config",
+          },
+        ],
+      }),
+    );
+
+    expect(output.findings.map((finding) => finding.code)).not.toContain("redirected-route");
+    expect(output.redirectContracts).toMatchObject({
+      declared: 1,
+      verified: 1,
+      failed: 0,
+      unchecked: 0,
+    });
+  });
+
+  it("reports a missing expected redirect without a duplicate page-status error", () => {
+    const output = auditSite(
+      auditInput([route("/old", { page: snapshot("/old", { status: 404 }) })], {
+        redirectContracts: [
+          {
+            from: absolute("/old"),
+            to: absolute("/new"),
+            status: 301,
+            maxHops: 1,
+            source: "config",
+          },
+        ],
+      }),
+    );
+    const codes = output.findings.map((finding) => finding.code);
+
+    expect(codes).toContain("expected-redirect-missing");
+    expect(codes).not.toContain("not-found");
+  });
+});
+
 describe("cross-route sitemap and link audits", () => {
   it("flags redirects, broken URLs, and noindex conflicts in sitemaps and internal links", () => {
     const root = route("/", {

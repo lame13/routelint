@@ -35,6 +35,7 @@ describe("loadConfig", () => {
       seeds: ["https://example.test/docs"],
       sitemaps: "auto",
       headers: {},
+      redirects: [],
       include: [],
       exclude: [],
       queryPolicy: "drop",
@@ -71,6 +72,10 @@ sitemaps: [/configured-sitemap.xml]
 agents: [googlebot]
 headers:
   X-Configured: from-file
+redirects:
+  - from: /old-pricing
+    to: /pricing
+    status: 301
 include: [/docs/**]
 exclude: [/docs/private/**]
 queryPolicy: keep
@@ -115,6 +120,14 @@ next:
     expect(config.sitemaps).toEqual(["https://live.test/live.xml"]);
     expect(config.agents.map((agent) => agent.key)).toEqual(["browser", "custom-my-audit-bot-1-0"]);
     expect(config.headers).toEqual({ "x-command": "from-cli", "x-configured": "from-file" });
+    expect(config.redirects).toEqual([
+      {
+        from: "https://live.test/old-pricing",
+        to: "https://live.test/pricing",
+        status: 301,
+        maxHops: 1,
+      },
+    ]);
     expect(config.include).toEqual(["/public/**"]);
     expect(config.exclude).toEqual(["/docs/private/**"]);
     expect(config.queryPolicy).toBe("drop");
@@ -242,6 +255,52 @@ headers:
 
     await expect(loadConfig({ cwd: directory })).rejects.toThrow(
       "environment variable that is not set: ROUTELINT_MISSING_TOKEN",
+    );
+  });
+
+  it("rejects redirect contracts that are ambiguous, off-origin, or impossible to capture", async () => {
+    const directory = await temporaryDirectory();
+    const configPath = join(directory, "routelint.config.yml");
+
+    await writeFile(
+      configPath,
+      `baseUrl: https://example.test
+redirects:
+  - from: /old?campaign=one
+    to: /new
+    status: 301
+`,
+      "utf8",
+    );
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow("cannot include query strings");
+
+    await writeFile(
+      configPath,
+      `baseUrl: https://example.test
+redirects:
+  - from: /old
+    to: https://outside.test/new
+    status: 301
+`,
+      "utf8",
+    );
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow("configured origin");
+
+    await writeFile(
+      configPath,
+      `baseUrl: https://example.test
+limits:
+  maxRedirects: 1
+redirects:
+  - from: /old
+    to: /new
+    status: 301
+    maxHops: 2
+`,
+      "utf8",
+    );
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow(
+      "maxHops cannot exceed limits.maxRedirects",
     );
   });
 

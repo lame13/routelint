@@ -147,6 +147,14 @@ describe("changed-only reports", () => {
         renderedTimeoutMs: 20_000,
         renderedSettleMs: 250,
         headerNames: ["authorization", "x-preview-key"],
+        redirects: [
+          {
+            from: "https://example.test/old",
+            to: "https://example.test/new",
+            status: 301 as const,
+            maxHops: 1,
+          },
+        ],
       },
     } satisfies RouteLintReport;
     const baseline = {
@@ -165,11 +173,19 @@ describe("changed-only reports", () => {
         renderedTimeoutMs: 19_000,
         renderedSettleMs: 100,
         headerNames: ["authorization"],
+        redirects: [
+          {
+            from: "https://example.test/old",
+            to: "https://example.test/other",
+            status: 301 as const,
+            maxHops: 1,
+          },
+        ],
       },
     } satisfies RouteLintReport;
 
     expect(() => changedOnlyReport(current, baseline)).toThrow(
-      "seed URLs, sitemap mode, sitemap URLs, include filters, exclude filters, request timeout, response byte limit, redirect limit, rendered concurrency, rendered timeout, rendered settle time, request header names differ",
+      "seed URLs, sitemap mode, sitemap URLs, include filters, exclude filters, request timeout, response byte limit, redirect limit, rendered concurrency, rendered timeout, rendered settle time, request header names, redirect contracts differ",
     );
   });
 

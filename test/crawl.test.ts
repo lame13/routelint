@@ -247,6 +247,36 @@ describe("crawlSite", () => {
     expect(depthLimited.routes[0]?.outbound).toHaveLength(3);
   });
 
+  it("fetches redirect contract sources before their targets when the page budget is tight", async () => {
+    const requested: string[] = [];
+    const origin = await listen((request, response) => {
+      requested.push(request.url ?? "");
+      response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
+    });
+
+    const result = await crawlSite(
+      crawlOptions(origin, {
+        maxPages: 1,
+        candidates: [
+          {
+            url: "/z-source",
+            depth: 0,
+            sources: [{ kind: "redirect-contract", from: "config", detail: "source" }],
+          },
+          {
+            url: "/a-target",
+            depth: 0,
+            sources: [{ kind: "redirect-contract", from: `${origin}/z-source`, detail: "target" }],
+          },
+        ],
+      }),
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(result.routes.map((route) => route.url)).toEqual([`${origin}/z-source`]);
+    expect(requested).toEqual(["/z-source"]);
+  });
+
   it("applies the concurrency budget across all agent requests", async () => {
     let active = 0;
     let maximumActive = 0;

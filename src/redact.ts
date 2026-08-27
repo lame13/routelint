@@ -8,6 +8,9 @@ import type {
   MetadataSignal,
   PageSignals,
   PageSnapshot,
+  RedirectContractCheck,
+  RedirectContractReport,
+  RedirectExpectation,
   RenderedPageSnapshot,
   RobotsFile,
   RobotsSignal,
@@ -104,6 +107,52 @@ function snapshot(value: PageSnapshot, secrets: readonly string[]): PageSnapshot
     })),
     signals: signals(value.signals, secrets),
     ...(value.error === undefined ? {} : { error: text(value.error, secrets) }),
+  };
+}
+
+function redirectExpectation(
+  value: RedirectExpectation,
+  secrets: readonly string[],
+): RedirectExpectation {
+  return {
+    ...value,
+    from: reference(value.from, secrets),
+    to: reference(value.to, secrets),
+  };
+}
+
+function redirectContractCheck(
+  value: RedirectContractCheck,
+  secrets: readonly string[],
+): RedirectContractCheck {
+  return {
+    ...value,
+    contract: {
+      ...redirectExpectation(value.contract, secrets),
+      source: value.contract.source,
+    },
+    observed: {
+      ...value.observed,
+      hops: value.observed.hops.map((hop) => ({
+        ...hop,
+        url: reference(hop.url, secrets),
+        location: reference(hop.location, secrets),
+      })),
+      ...(value.observed.finalUrl === undefined
+        ? {}
+        : { finalUrl: reference(value.observed.finalUrl, secrets) }),
+    },
+    findingCodes: value.findingCodes.map((code) => text(code, secrets)),
+  };
+}
+
+function redirectContractReport(
+  value: RedirectContractReport,
+  secrets: readonly string[],
+): RedirectContractReport {
+  return {
+    ...value,
+    checks: value.checks.map((check) => redirectContractCheck(check, secrets)),
   };
 }
 
@@ -283,6 +332,13 @@ export function redactReport(
       ...(report.config.headerNames === undefined
         ? {}
         : { headerNames: report.config.headerNames.map((name) => text(name, secrets)) }),
+      ...(report.config.redirects === undefined
+        ? {}
+        : {
+            redirects: report.config.redirects.map((expectation) =>
+              redirectExpectation(expectation, secrets),
+            ),
+          }),
     },
     ...(report.inputs === undefined
       ? {}
@@ -293,6 +349,9 @@ export function redactReport(
           },
         }),
     ...(report.build === undefined ? {} : { build: build(report.build, secrets) }),
+    ...(report.redirectContracts === undefined
+      ? {}
+      : { redirectContracts: redirectContractReport(report.redirectContracts, secrets) }),
     sitemap: sitemap(report.sitemap, secrets),
     ...(report.robots === undefined ? {} : { robots: robots(report.robots, secrets) }),
     routes: report.routes.map((item) => route(item, secrets, localPaths)),
