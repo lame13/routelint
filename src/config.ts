@@ -11,6 +11,7 @@ import type {
   NextOptions,
   PathAuditOptions,
   QueryPolicy,
+  RedirectExpectation,
   RenderedOptions,
   RouteLintConfig,
 } from "./types.js";
@@ -23,6 +24,13 @@ const CONFIG_FILENAMES = [
 
 const positiveInteger = z.number().int().positive();
 const nonNegativeInteger = z.number().int().nonnegative();
+const redirectStatus = z.union([
+  z.literal(301),
+  z.literal(302),
+  z.literal(303),
+  z.literal(307),
+  z.literal(308),
+]);
 const severityOverrides = z.record(z.string().min(1), z.enum(["error", "warning", "info", "off"]));
 const auditRequirementOverrides = {
   requireTitle: z.boolean().optional(),
@@ -41,6 +49,18 @@ const rawConfigSchema = z
     sitemaps: z.union([z.literal("auto"), z.array(z.string())]).optional(),
     agents: z.array(z.string()).min(1).optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    redirects: z
+      .array(
+        z
+          .object({
+            from: z.string().min(1),
+            to: z.string().min(1),
+            status: redirectStatus,
+            maxHops: positiveInteger.optional(),
+          })
+          .strict(),
+      )
+      .optional(),
     include: z.array(z.string()).optional(),
     exclude: z.array(z.string()).optional(),
     queryPolicy: z.enum(["drop", "keep"]).optional(),
@@ -184,6 +204,63 @@ function resolveUrlList(values: readonly string[], baseUrl: string, label: strin
       throw new Error(`${label}[${index}] is invalid.`);
     }
   });
+}
+
+function resolveRedirectExpectations(
+  values: RawConfig["redirects"],
+  baseUrl: string,
+  maxRedirects: number,
+): readonly RedirectExpectation[] {
+  const base = new URL(baseUrl);
+  const resolved = new Map<string, RedirectExpectation>();
+  for (const [index, value] of (values ?? []).entries()) {
+    const fromLabel = `redirects[${index}].from`;
+    const toLabel = `redirects[${index}].to`;
+    let from: URL;
+    let to: URL;
+    try {
+      from = parseHttpUrl(new URL(value.from, base).href, fromLabel);
+    } catch {
+      throw new Error(`${fromLabel} must be an HTTP(S) URL or path without credentials.`);
+    }
+    try {
+      to = parseHttpUrl(new URL(value.to, base).href, toLabel);
+    } catch {
+      throw new Error(`${toLabel} must be an HTTP(S) URL or path without credentials.`);
+    }
+    if (from.origin !== base.origin || to.origin !== base.origin) {
+      throw new Error(`redirects[${index}] must stay on the configured origin.`);
+    }
+    if (from.search.length > 0 || to.search.length > 0) {
+      throw new Error(`redirects[${index}] cannot include query strings.`);
+    }
+    if (from.href === to.href) {
+      throw new Error(`redirects[${index}] cannot redirect a URL to itself.`);
+    }
+    const maxHops = value.maxHops ?? 1;
+    if (maxHops > maxRedirects) {
+      throw new Error(
+        `redirects[${index}].maxHops cannot exceed limits.maxRedirects (${maxRedirects}).`,
+      );
+    }
+    const expectation: RedirectExpectation = {
+      from: from.href,
+      to: to.href,
+      status: value.status,
+      maxHops,
+    };
+    const existing = resolved.get(expectation.from);
+    if (
+      existing !== undefined &&
+      (existing.to !== expectation.to ||
+        existing.status !== expectation.status ||
+        existing.maxHops !== expectation.maxHops)
+    ) {
+      throw new Error(`redirects[${index}] conflicts with another contract for ${from.href}.`);
+    }
+    resolved.set(expectation.from, expectation);
+  }
+  return [...resolved.values()].sort((left, right) => left.from.localeCompare(right.from));
 }
 
 function seedResolutionBase(
@@ -361,6 +438,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Route
     timeoutMs: overrides.renderedTimeoutMs ?? raw.rendered?.timeoutMs ?? DEFAULT_RENDERED.timeoutMs,
     settleMs: overrides.renderedSettleMs ?? raw.rendered?.settleMs ?? DEFAULT_RENDERED.settleMs,
   };
+  const redirects = resolveRedirectExpectations(raw.redirects, baseUrl, limits.maxRedirects);
 
   const seedValues = raw.seeds ?? [baseUrl];
   const sitemapValues = overrides.sitemaps ?? (raw.sitemaps === "auto" ? undefined : raw.sitemaps);
@@ -381,6 +459,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Route
     sitemaps,
     agents,
     headers: resolveHeaders(raw.headers ?? {}, overrides.headers ?? {}),
+    redirects,
     include: [...(overrides.include ?? raw.include ?? [])],
     exclude: [...(overrides.exclude ?? raw.exclude ?? [])],
     queryPolicy: overrides.queryPolicy ?? raw.queryPolicy ?? "drop",
@@ -422,6 +501,13 @@ agents:
   - routelint
 respectRobots: true
 queryPolicy: drop
+
+# Exact redirect contracts add both the source and destination to the crawl:
+# redirects:
+#   - from: /old-pricing
+#     to: /pricing
+#     status: 301
+#     maxHops: 1
 
 limits:
   maxPages: 250

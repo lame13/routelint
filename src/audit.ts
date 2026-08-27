@@ -1,9 +1,12 @@
 import { simhashDistance } from "./content.js";
+import { auditRedirectContracts } from "./redirects.js";
 import type {
   AuditOptions,
   BuildInventory,
   Finding,
   PageSnapshot,
+  RedirectContract,
+  RedirectContractReport,
   RobotsFile,
   RouteLintSummary,
   RouteNode,
@@ -18,6 +21,8 @@ export interface AuditInput {
   readonly sitemap: SitemapInventory;
   readonly robots?: RobotsFile;
   readonly build?: BuildInventory;
+  readonly redirectContracts?: readonly RedirectContract[];
+  readonly skippedBuildRedirects?: number;
   readonly options: AuditOptions;
   readonly truncated: boolean;
 }
@@ -25,6 +30,7 @@ export interface AuditInput {
 export interface AuditOutput {
   readonly findings: readonly Finding[];
   readonly summary: RouteLintSummary;
+  readonly redirectContracts: RedirectContractReport;
 }
 
 type Indexability = "indexable" | "noindex" | "unknown";
@@ -203,7 +209,12 @@ function checkRepeated(
   });
 }
 
-function checkPage(findings: Finding[], route: RouteNode, options: AuditOptions): void {
+function checkPage(
+  findings: Finding[],
+  route: RouteNode,
+  options: AuditOptions,
+  isRedirectContractSource: boolean,
+): void {
   options = optionsForRoute(options, route.url);
   const snapshot = primarySnapshot(route);
   if (snapshot === undefined) {
@@ -252,6 +263,7 @@ function checkPage(findings: Finding[], route: RouteNode, options: AuditOptions)
     });
     return;
   }
+  if (isRedirectContractSource) return;
   if (snapshot.status >= 400) {
     pushFinding(findings, {
       code: snapshot.status >= 500 ? "server-error" : "not-found",
@@ -1175,16 +1187,27 @@ function summarize(routes: readonly RouteNode[], findings: readonly Finding[]): 
 
 export function auditSite(input: AuditInput): AuditOutput {
   const findings: Finding[] = [];
+  const redirectAudit = auditRedirectContracts(
+    input.routes,
+    input.redirectContracts ?? [],
+    input.skippedBuildRedirects ?? 0,
+  );
+  const redirectSources = new Set((input.redirectContracts ?? []).map((contract) => contract.from));
   addInventoryFindings(input, findings);
+  findings.push(...redirectAudit.findings);
   for (const route of input.routes) {
-    checkPage(findings, route, input.options);
+    checkPage(findings, route, input.options, redirectSources.has(route.url));
     checkAgentDifferences(findings, route);
   }
   checkGraph(input, findings);
   checkDuplicates(input.routes, findings);
   checkSoft404s(input.routes, findings);
   const deduplicated = deduplicateFindings(applySeverityConfiguration(findings, input.options));
-  return { findings: deduplicated, summary: summarize(input.routes, deduplicated) };
+  return {
+    findings: deduplicated,
+    summary: summarize(input.routes, deduplicated),
+    redirectContracts: redirectAudit.report,
+  };
 }
 
 export function highestSeverity(findings: readonly Finding[]): Severity | undefined {

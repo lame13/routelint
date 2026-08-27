@@ -266,7 +266,12 @@ function collectInitialCandidates(
     );
   }
   for (const candidate of options.candidates) {
-    addInitial(candidates, candidate, options, normalizedBase, 1);
+    const priority = candidate.sources.some(
+      (source) => source.kind === "redirect-contract" && source.detail === "source",
+    )
+      ? 0
+      : 1;
+    addInitial(candidates, candidate, options, normalizedBase, priority);
   }
   return [...candidates.values()].sort(
     (left, right) =>

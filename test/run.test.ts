@@ -139,13 +139,23 @@ describe("runRouteLint", () => {
       response.writeHead(500).end("The robots-blocked route must never be requested.");
     });
 
-    const report = await runRouteLint(config(`${origin}/`));
+    const report = await runRouteLint({
+      ...config(`${origin}/`),
+      redirects: [
+        {
+          from: `${origin}/old`,
+          to: `${origin}/about`,
+          status: 301,
+          maxHops: 1,
+        },
+      ],
+    });
     const byUrl = new Map(report.routes.map((route) => [route.url, route]));
     const findingCodes = report.findings.map((finding) => finding.code);
 
     expect(report).toMatchObject({
-      schemaVersion: "2",
-      toolVersion: "0.2.0",
+      schemaVersion: "3",
+      toolVersion: "0.3.0",
       baseUrl: `${origin}/`,
       truncated: false,
       config: {
@@ -163,7 +173,22 @@ describe("runRouteLint", () => {
         maxBytes: 100_000,
         maxRedirects: 3,
         headerNames: ["x-preview-key"],
+        redirects: [
+          {
+            from: `${origin}/old`,
+            to: `${origin}/about`,
+            status: 301,
+            maxHops: 1,
+          },
+        ],
       },
+    });
+    expect(report.redirectContracts).toMatchObject({
+      declared: 1,
+      verified: 1,
+      failed: 0,
+      unchecked: 0,
+      skippedBuildRedirects: 0,
     });
     expect(report.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(report.durationMs).toBeGreaterThanOrEqual(0);

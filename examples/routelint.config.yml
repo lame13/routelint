@@ -8,6 +8,12 @@ agents:
 respectRobots: true
 queryPolicy: drop
 
+redirects:
+  - from: /old-pricing
+    to: /pricing
+    status: 301
+    maxHops: 1
+
 exclude:
   - /account/**
   - /api/**

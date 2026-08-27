@@ -1,5 +1,12 @@
 import { getSnapshotIndexability } from "../audit.js";
-import type { Finding, PageCompletion, RouteLintReport, RouteNode, Severity } from "../types.js";
+import type {
+  Finding,
+  PageCompletion,
+  RedirectContractCheck,
+  RouteLintReport,
+  RouteNode,
+  Severity,
+} from "../types.js";
 
 const GRAPH_ROUTE_LIMIT = 120;
 const GRAPH_EDGE_LIMIT = 500;
@@ -126,6 +133,12 @@ function highestSeverity(findings: readonly Finding[]): Severity | undefined {
 
 function severityBadge(severity: Severity, label: string = severity): string {
   return `<span class="badge badge-${severity}">${escapeHtml(label)}</span>`;
+}
+
+function redirectOutcomeBadge(check: RedirectContractCheck): string {
+  const severity =
+    check.outcome === "verified" ? "verified" : check.outcome === "failed" ? "error" : "warning";
+  return `<span class="badge badge-${severity}">${escapeHtml(check.outcome)}</span>`;
 }
 
 function summaryCard(label: string, value: number, detail: string): string {
@@ -313,6 +326,63 @@ function renderFindingRows(findings: readonly Finding[]): string {
     .join("\n");
 }
 
+function redirectObservedMarkup(check: RedirectContractCheck): string {
+  const observed = check.observed;
+  if (observed.completion !== "complete") {
+    return `<span class="evidence-incomplete">${escapeHtml(observed.completion)}</span>`;
+  }
+  if (observed.hops.length === 0) {
+    return `No redirect · final HTTP ${escapeHtml(observed.finalStatus ?? "—")}`;
+  }
+  return `<ol class="redirect-path">${observed.hops
+    .map(
+      (hop) =>
+        `<li><strong>${escapeHtml(hop.status)}</strong> <code class="url-value">${escapeHtml(hop.location)}</code></li>`,
+    )
+    .join("")}</ol><p class="compact">Final HTTP ${escapeHtml(observed.finalStatus ?? "—")}</p>`;
+}
+
+function renderRedirectContracts(report: RouteLintReport): string {
+  const contracts = report.redirectContracts;
+  if (
+    contracts === undefined ||
+    (contracts.declared === 0 && contracts.skippedBuildRedirects === 0)
+  ) {
+    return "";
+  }
+  const rows = contracts.checks
+    .map(
+      (check) => `<tr>
+        <th scope="row"><code class="url-value">${escapeHtml(check.contract.from)}</code><p class="compact muted">${check.contract.source === "config" ? "Config" : "Next.js build"}</p></th>
+        <td><strong>${escapeHtml(check.contract.status)}</strong> → <code class="url-value">${escapeHtml(check.contract.to)}</code><p class="compact muted">At most ${escapeHtml(check.contract.maxHops)} hop${check.contract.maxHops === 1 ? "" : "s"}</p></td>
+        <td>${redirectObservedMarkup(check)}</td>
+        <td>HTTP ${escapeHtml(check.observed.finalStatus ?? "—")} · ${escapeHtml(check.observed.targetIndexability)}</td>
+        <td>${redirectOutcomeBadge(check)}${
+          check.findingCodes.length === 0
+            ? ""
+            : `<ul class="contract-findings">${check.findingCodes.map((code) => `<li><code>${escapeHtml(code)}</code></li>`).join("")}</ul>`
+        }</td>
+      </tr>`,
+    )
+    .join("\n");
+  const content =
+    rows.length === 0
+      ? '<div class="empty-state">No configured contracts or eligible exact Next.js redirects were available for checks.</div>'
+      : `<div class="table-scroll"><table>
+          <thead><tr><th scope="col">Source</th><th scope="col">Expected</th><th scope="col">Observed chain</th><th scope="col">Destination</th><th scope="col">Result</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`;
+  const skippedSummary =
+    contracts.skippedBuildRedirects === 0
+      ? ""
+      : ` ${escapeHtml(contracts.skippedBuildRedirects)} Next.js definitions were outside contract scope and remain inventory-only.`;
+  return `<section aria-labelledby="redirect-contracts-heading">
+    <h2 id="redirect-contracts-heading">Redirect contracts</h2>
+    <p class="section-note">${escapeHtml(contracts.verified)} of ${escapeHtml(contracts.declared)} contracts verified. ${escapeHtml(contracts.failed)} failed and ${escapeHtml(contracts.unchecked)} could not be checked.${skippedSummary}</p>
+    ${content}
+  </section>`;
+}
+
 function incompleteSummary(report: RouteLintReport): {
   readonly routes: number;
   readonly reasons: readonly string[];
@@ -488,6 +558,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .badge-error { color: var(--error); background: var(--error-soft); }
 .badge-warning { color: var(--warning); background: var(--warning-soft); }
 .badge-info { color: var(--info); background: var(--info-soft); }
+.badge-verified { color: var(--complete); background: var(--complete-soft); }
 .evidence-complete { color: var(--complete); }
 .evidence-incomplete { color: var(--warning); font-weight: 700; }
 .finding-message { max-width: 55ch; margin: 0; }
@@ -498,6 +569,9 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .related { margin-top: 0.45rem; }
 .related summary { cursor: pointer; color: #0755a3; }
 .related ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+.redirect-path, .contract-findings { margin: 0; padding-left: 1.2rem; }
+.contract-findings { margin-top: 0.45rem; }
+.compact { margin: 0.3rem 0 0; }
 .scope-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--line); }
 .scope-list div { padding: 0.7rem 0; border-bottom: 1px solid var(--line); }
 .scope-list dt { color: var(--muted); font-size: 0.78rem; }
@@ -629,6 +703,8 @@ export function renderHtmlReport(report: RouteLintReport): string {
       </dl>
     </section>
 
+    ${renderRedirectContracts(report)}
+
     <section aria-labelledby="graph-heading">
       <h2 id="graph-heading">Route graph</h2>
       <ul class="legend" aria-label="Graph legend">
@@ -675,6 +751,7 @@ export function renderHtmlReport(report: RouteLintReport): string {
         <div><dt>URL-list files</dt><dd>${escapeHtml(report.inputs?.urlListFiles ?? report.config.urlListFiles ?? 0)}</dd></div>
         <div><dt>URL-list routes</dt><dd>${escapeHtml(report.inputs?.urlListUrls ?? 0)}</dd></div>
         <div><dt>Path rule scopes</dt><dd>${escapeHtml(report.config.audit?.paths?.length ?? 0)}</dd></div>
+        <div><dt>Redirect contracts</dt><dd>${escapeHtml(report.redirectContracts?.declared ?? 0)}</dd></div>
         <div><dt>Schema version</dt><dd>${escapeHtml(report.schemaVersion)}</dd></div>
       </dl>
     </section>

@@ -99,6 +99,7 @@ function assertComparable(current: RouteLintReport, baseline: RouteLintReport): 
     ["rendered settle time", current.config.renderedSettleMs, baseline.config.renderedSettleMs],
     ["request header names", current.config.headerNames, baseline.config.headerNames],
     ["URL-list input count", current.config.urlListFiles, baseline.config.urlListFiles],
+    ["redirect contracts", current.config.redirects, baseline.config.redirects],
     ["audit policy", current.config.audit, baseline.config.audit],
   ];
   for (const [label, currentValue, baselineValue] of checks) {

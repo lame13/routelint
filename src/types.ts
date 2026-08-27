@@ -2,6 +2,7 @@ export type Severity = "error" | "warning" | "info";
 export type RuleSeverity = Severity | "off";
 export type ReportFormat = "terminal" | "json" | "sarif" | "html";
 export type QueryPolicy = "drop" | "keep";
+export type RedirectStatus = 301 | 302 | 303 | 307 | 308;
 export type PageCompletion =
   | "complete"
   | "max-bytes-exceeded"
@@ -15,7 +16,8 @@ export type RouteSourceKind =
   | "internal-link"
   | "next-build"
   | "sample"
-  | "url-list";
+  | "url-list"
+  | "redirect-contract";
 export type RenderMode = "static" | "isr" | "dynamic" | "unknown";
 
 export interface AgentProfile {
@@ -54,6 +56,51 @@ export interface BuildRedirect {
   readonly source: string;
   readonly destination: string;
   readonly status: number;
+  /** Conditional redirects cannot be verified without reproducing their request matcher. */
+  readonly conditional?: boolean;
+}
+
+/** An exact redirect behavior declared by configuration. */
+export interface RedirectExpectation {
+  readonly from: string;
+  readonly to: string;
+  readonly status: RedirectStatus;
+  readonly maxHops: number;
+}
+
+export type RedirectContractSource = "config" | "next-build";
+
+/** An effective redirect expectation, including its source of truth. */
+export interface RedirectContract extends RedirectExpectation {
+  readonly source: RedirectContractSource;
+}
+
+export type RedirectContractOutcome = "verified" | "failed" | "unchecked";
+export type RedirectTargetIndexability = "indexable" | "noindex" | "unknown";
+
+export interface RedirectContractObservation {
+  readonly completion: PageCompletion | "not-fetched";
+  readonly hops: readonly RedirectHop[];
+  readonly finalUrl?: string;
+  readonly finalStatus?: number;
+  readonly targetIndexability: RedirectTargetIndexability;
+}
+
+/** Structured evidence for one redirect contract. */
+export interface RedirectContractCheck {
+  readonly contract: RedirectContract;
+  readonly observed: RedirectContractObservation;
+  readonly outcome: RedirectContractOutcome;
+  readonly findingCodes: readonly string[];
+}
+
+export interface RedirectContractReport {
+  readonly declared: number;
+  readonly verified: number;
+  readonly failed: number;
+  readonly unchecked: number;
+  readonly skippedBuildRedirects: number;
+  readonly checks: readonly RedirectContractCheck[];
 }
 
 export interface SitemapEntry {
@@ -237,6 +284,7 @@ export interface RouteLintReport {
   readonly config: ReportConfigSnapshot;
   readonly inputs?: InputInventory;
   readonly build?: BuildInventory;
+  readonly redirectContracts?: RedirectContractReport;
   readonly sitemap: SitemapInventory;
   readonly robots?: RobotsFile;
   readonly routes: readonly RouteNode[];
@@ -281,6 +329,7 @@ export interface ReportConfigSnapshot {
   readonly renderedSettleMs?: number;
   readonly headerNames?: readonly string[];
   readonly urlListFiles?: number;
+  readonly redirects?: readonly RedirectExpectation[];
   readonly audit?: AuditOptions;
 }
 
@@ -357,6 +406,7 @@ export interface RouteLintConfig {
   readonly sitemaps: "auto" | readonly string[];
   readonly agents: readonly AgentProfile[];
   readonly headers: Readonly<Record<string, string>>;
+  readonly redirects?: readonly RedirectExpectation[];
   readonly include: readonly string[];
   readonly exclude: readonly string[];
   readonly queryPolicy: QueryPolicy;

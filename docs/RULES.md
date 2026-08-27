@@ -23,6 +23,19 @@ RouteLint findings use stable codes, a severity, a direct message, and the URLs 
 
 Incomplete captures are not treated as indexable and are not passed through metadata, graph, or duplicate-content checks.
 
+## Redirect contracts
+
+| Code | Default severity | Meaning |
+| --- | --- | --- |
+| `expected-redirect-missing` | error | A declared redirect source did not redirect. |
+| `redirect-status-mismatch` | error | The first hop did not use the declared redirect status. |
+| `redirect-target-mismatch` | error | The observed chain did not end at the declared destination. |
+| `redirect-chain` | warning | The observed chain exceeded the declared hop limit. |
+| `redirect-target-unhealthy` | error | The declared destination returned a non-2xx response or was `noindex`. |
+| `redirect-contract-unchecked` | warning | The contract lacked complete source evidence because of limits, robots policy, or a fetch failure. |
+
+A contract source is exempt from the generic `redirected-route` and ordinary page-response findings. Sitemap and link-graph checks still apply because intentional redirects should not remain in sitemaps or internal links. See [REDIRECTS.md](REDIRECTS.md).
+
 ## Page signals
 
 | Code family | Meaning |

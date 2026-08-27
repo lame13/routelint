@@ -1,6 +1,6 @@
 {
   "name": "routelint",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Audit the routes, SSR content, links, canonicals, sitemaps, and indexability signals a site actually ships.",
   "type": "module",
   "bin": {

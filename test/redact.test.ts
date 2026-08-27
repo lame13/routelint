@@ -19,6 +19,14 @@ describe("report redaction", () => {
         agents: ["routelint"],
         respectRobots: true,
         queryPolicy: "keep",
+        redirects: [
+          {
+            from: `https://example.com/private?token=${secret}`,
+            to: `https://example.com/public?token=${secret}`,
+            status: 301,
+            maxHops: 1,
+          },
+        ],
       },
       build: {
         framework: "next",
@@ -42,6 +50,40 @@ describe("report redaction", () => {
         groups: [],
         sitemaps: [],
         warnings: [`robots.txt failed near ${secret}`],
+      },
+      redirectContracts: {
+        declared: 1,
+        verified: 0,
+        failed: 1,
+        unchecked: 0,
+        skippedBuildRedirects: 0,
+        checks: [
+          {
+            contract: {
+              from: `https://example.com/private?token=${secret}`,
+              to: `https://example.com/public?token=${secret}`,
+              status: 301,
+              maxHops: 1,
+              source: "config",
+            },
+            observed: {
+              completion: "complete",
+              hops: [
+                {
+                  url: `https://example.com/private?token=${secret}`,
+                  status: 302,
+                  location: `https://example.com/wrong?token=${secret}`,
+                  durationMs: 1,
+                },
+              ],
+              finalUrl: `https://example.com/wrong?token=${secret}`,
+              finalStatus: 200,
+              targetIndexability: "indexable",
+            },
+            outcome: "failed",
+            findingCodes: ["redirect-status-mismatch", "redirect-target-mismatch"],
+          },
+        ],
       },
       routes: [
         {

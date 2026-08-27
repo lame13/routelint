@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/routelint)](https://www.npmjs.com/package/routelint)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-RouteLint finds technical-SEO mistakes that become obvious only when routes are compared as a system: broken internal links, soft 404s, empty SSR shells, duplicate server content, sitemap conflicts, unhealthy canonical targets, missing hreflang return links, orphan pages, and Next.js build routes that do not survive deployment.
+RouteLint finds technical-SEO mistakes that become obvious only when routes are compared as a system: broken internal links, incorrect migration redirects, soft 404s, empty SSR shells, duplicate server content, sitemap conflicts, unhealthy canonical targets, missing hreflang return links, orphan pages, and Next.js build routes that do not survive deployment.
 
 Raw server responses remain the primary evidence. An optional Playwright pass compares that evidence with the browser-rendered DOM. RouteLint does not invent an SEO score.
 
@@ -18,6 +18,7 @@ npx routelint check https://example.com
 | --- | --- |
 | Route discovery | Seeds, URL-list files or stdin, recursive sitemap indexes, `robots.txt`, crawlable internal links, and optional Next.js build manifests |
 | HTTP delivery | Status, explicit redirect chain, final URL, content type, response size, timeouts, and bot-specific responses |
+| Redirect contracts | Expected first-hop status, final destination, hop limit, and target health for configured and concrete Next.js redirects |
 | Server-rendered HTML | Title, description, canonical, robots/googlebot/bingbot directives, H1, language, links, hreflang, body-text fingerprints, empty shells, soft 404s, and duplicate bodies |
 | Rendered comparison | Optional browser evidence for content and SEO signals that appear only after JavaScript runs |
 | Link graph | Broken and redirecting links, links to `noindex`, orphans, dead ends, and crawl depth |
@@ -103,6 +104,24 @@ npx routelint check https://example.com --urls routes.txt
 cat routes.txt | npx routelint check https://example.com --urls -
 ```
 
+### Verify intentional redirects
+
+Declare exact same-origin redirect behavior in the normal config:
+
+```yaml
+baseUrl: https://example.com
+
+redirects:
+  - from: /old-pricing
+    to: /pricing
+    status: 301
+    maxHops: 1
+```
+
+`routelint check` adds the source and destination to the crawl. It fails on a missing redirect, wrong first-hop status, wrong final destination, or unhealthy target. Excessive chains are warnings. Correct contracts are counted without producing findings. `routelint next` also checks exact, unconditional redirects found in supported Next.js build manifests.
+
+See [docs/REDIRECTS.md](docs/REDIRECTS.md) for the exact scope and finding codes.
+
 ### Compare SSR with the rendered DOM
 
 Browser comparison is opt-in. Playwright is an optional peer so normal installs do not download a browser.
@@ -170,6 +189,12 @@ agents:
   - routelint
 respectRobots: true
 queryPolicy: drop
+
+redirects:
+  - from: /old-pricing
+    to: /pricing
+    status: 301
+    maxHops: 1
 
 include: []
 exclude:
@@ -243,7 +268,7 @@ npx routelint check https://example.com \
 
 The repository CI only installs, lints, typechecks, tests, builds, packs, and smoke-tests the tarball on Linux, macOS, and Windows. It does not publish to npm and it needs no npm token.
 
-See [examples/github-actions.yml](examples/github-actions.yml) for a site-check job and [PUBLISHING.md](PUBLISHING.md) for the first interactive npm release.
+See [examples/github-actions.yml](examples/github-actions.yml) for a site-check job and [PUBLISHING.md](PUBLISHING.md) for the interactive npm release process.
 
 ## Reading the result honestly
 
@@ -256,10 +281,11 @@ RouteLint deliberately does not:
 - calculate Core Web Vitals;
 - submit URLs to search engines;
 - crawl external links by default;
+- emulate dynamic, conditional, query-bearing, or off-origin redirect rules;
 - claim that an unobserved dynamic route exists;
 - replace a full authenticated browser test or a search-engine index report.
 
-See [docs/RULES.md](docs/RULES.md) for finding codes, [docs/RENDERED.md](docs/RENDERED.md) for browser evidence, [docs/URL_LISTS.md](docs/URL_LISTS.md) for explicit inventories, and [docs/NEXT.md](docs/NEXT.md) for Next.js discovery details.
+See [docs/RULES.md](docs/RULES.md) for finding codes, [docs/REDIRECTS.md](docs/REDIRECTS.md) for redirect contracts, [docs/RENDERED.md](docs/RENDERED.md) for browser evidence, [docs/URL_LISTS.md](docs/URL_LISTS.md) for explicit inventories, and [docs/NEXT.md](docs/NEXT.md) for Next.js discovery details.
 
 ## Programmatic API
 
@@ -277,7 +303,7 @@ const report = await runRouteLint(config);
 process.stdout.write(renderJsonReport(report));
 ```
 
-The report includes a schema version so stored baselines can be validated before comparison.
+The report includes a schema version so stored baselines can be validated before comparison. Redirect primitives and their TypeScript types are public exports; most callers only need `report.redirectContracts` from `runRouteLint`.
 
 ## Development
 

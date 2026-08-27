@@ -23,7 +23,7 @@ jobs:
           node-version: 24
       - name: Check deployed routes
         run: >-
-          npx --yes routelint@0.2.0 check "$ROUTELINT_BASE_URL"
+          npx --yes routelint@0.3.0 check "$ROUTELINT_BASE_URL"
           --format html
           --output routelint-report.html
           --fail-on error

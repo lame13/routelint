@@ -220,6 +220,61 @@ describe("report validation", () => {
     expect(parseRouteLintReport(roundTripped)).toEqual(value);
   });
 
+  it("round-trips schema-v3 redirect contract evidence", () => {
+    const value = {
+      ...report([route("/old")], [], "2026-08-27T00:00:00.000Z"),
+      schemaVersion: "3",
+      toolVersion: "0.3.0",
+      config: {
+        ...report().config,
+        redirects: [
+          {
+            from: absolute("/old"),
+            to: absolute("/new"),
+            status: 301 as const,
+            maxHops: 1,
+          },
+        ],
+      },
+      redirectContracts: {
+        declared: 1,
+        verified: 1,
+        failed: 0,
+        unchecked: 0,
+        skippedBuildRedirects: 0,
+        checks: [
+          {
+            contract: {
+              from: absolute("/old"),
+              to: absolute("/new"),
+              status: 301 as const,
+              maxHops: 1,
+              source: "config" as const,
+            },
+            observed: {
+              completion: "complete" as const,
+              hops: [
+                {
+                  url: absolute("/old"),
+                  status: 301,
+                  location: absolute("/new"),
+                  durationMs: 2,
+                },
+              ],
+              finalUrl: absolute("/new"),
+              finalStatus: 200,
+              targetIndexability: "indexable" as const,
+            },
+            outcome: "verified" as const,
+            findingCodes: [],
+          },
+        ],
+      },
+    } satisfies RouteLintReport;
+
+    expect(parseRouteLintReport(JSON.parse(JSON.stringify(value)))).toEqual(value);
+  });
+
   it("validates and preserves robots availability while accepting legacy reports", () => {
     const unavailable = {
       ...report(),
@@ -251,7 +306,7 @@ describe("report validation", () => {
 
   it.each([
     [null, "report"],
-    [{ ...report(), schemaVersion: "3" }, "schemaVersion"],
+    [{ ...report(), schemaVersion: "4" }, "schemaVersion"],
     [
       (() => {
         const { summary: _summary, ...missingSummary } = report();

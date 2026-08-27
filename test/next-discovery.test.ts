@@ -35,6 +35,12 @@ describe("Next.js build discovery", () => {
       redirects: [
         { source: "/old", destination: "/new", permanent: true },
         { source: "/temp", destination: "/later", statusCode: 302 },
+        {
+          source: "/member",
+          destination: "/account",
+          statusCode: 307,
+          has: [{ type: "header", key: "x-member" }],
+        },
       ],
     });
     await writeJson(path.join(build, "prerender-manifest.json"), {
@@ -109,6 +115,7 @@ describe("Next.js build discovery", () => {
     expect(inventory.routes.some((route) => route.pathname === "/feed.xml")).toBe(false);
     expect(inventory.unresolvedPatterns).toEqual(["/photo/[id]", "/shop/[id]"]);
     expect(inventory.redirects).toEqual([
+      { source: "/member", destination: "/account", status: 307, conditional: true },
       { source: "/old", destination: "/new", status: 308 },
       { source: "/temp", destination: "/later", status: 302 },
     ]);
