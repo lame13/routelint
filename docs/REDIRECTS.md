@@ -24,7 +24,7 @@ Both `from` and `to` are added to the crawl frontier. A matching contract requir
 - a complete 2xx response from the final target;
 - no applicable `noindex` directive on the final target.
 
-The source and destination must resolve to the configured origin. Query-bearing contracts are rejected in 0.3.0 because query retention and rewriting cannot be represented safely by this exact-path contract. `maxHops` cannot exceed `limits.maxRedirects`.
+The source and destination must resolve to the configured origin. Query-bearing contracts are rejected because query retention and rewriting cannot be represented safely by this exact-path contract. `maxHops` cannot exceed `limits.maxRedirects`.
 
 Correct contracts do not produce findings. The terminal report shows aggregate verified, failed, and unchecked counts. JSON and HTML reports retain one structured check per contract, including every observed redirect hop. SARIF contains contract failures only.
 

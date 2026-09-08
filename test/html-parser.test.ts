@@ -95,6 +95,64 @@ describe("parseHtml", () => {
     expect(signals.h1s[0]?.value).toBe("");
     expect(signals.links[0]?.text).toBe("Fallback");
   });
+
+  it("ignores template metadata and links, including nested templates", () => {
+    const signals = parseHtml(
+      `<html lang="en"><head>
+        <template>
+          <base href="https://outside.test/">
+          <title>Template title</title>
+          <meta name="description" content="Template description">
+          <meta name="robots" content="noindex">
+          <link rel="canonical" href="/template-canonical">
+          <link rel="alternate" hreflang="fr" href="/template-fr">
+          <h1>Template heading</h1>
+          <template><a href="/nested">Nested template link</a></template>
+          <a href="/template-only"><img alt="Template image"></a>
+          <script>unused()</script><style>.unused { color: red; }</style>
+        </template>
+        <base href="/docs/">
+        <title>Guide</title>
+      </head><body>
+        <h1>Read the guide</h1>
+        <a href="next">Next <template><img alt="Hidden label"></template>page</a>
+      </body></html>`,
+      "https://example.test/current",
+    );
+
+    expect(signals).toEqual({
+      htmlLang: "en",
+      baseHref: "/docs/",
+      titles: [{ value: "Guide", location: "head" }],
+      descriptions: [],
+      canonicals: [],
+      robots: [],
+      h1s: [{ value: "Read the guide", location: "body" }],
+      links: [
+        {
+          href: "next",
+          resolvedUrl: "https://example.test/docs/next",
+          text: "Next page",
+          rel: [],
+          nofollow: false,
+        },
+      ],
+      hreflangs: [],
+    });
+  });
+
+  it("ignores unclosed template contents while keeping earlier page signals", () => {
+    const signals = parseHtml(
+      `<head><title>Page</title></head><body><h1>Visible</h1>
+       <template><meta name="robots" content="noindex"><a href="/unused">Unused`,
+      "https://example.test/",
+    );
+
+    expect(signals.titles).toEqual([{ value: "Page", location: "head" }]);
+    expect(signals.h1s).toEqual([{ value: "Visible", location: "body" }]);
+    expect(signals.robots).toEqual([]);
+    expect(signals.links).toEqual([]);
+  });
 });
 
 describe("parseXRobotsTag", () => {

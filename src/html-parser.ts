@@ -49,6 +49,7 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
   const titleCaptures: TextCapture[] = [];
   const h1Captures: TextCapture[] = [];
   let headDepth = 0;
+  let templateDepth = 0;
   let ignoredTextDepth = 0;
   let htmlLang: string | undefined;
   let baseHref: string | undefined;
@@ -58,8 +59,11 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
     {
       onopentag(name, attributes) {
         const tag = name.toLowerCase();
+        if (tag === "template") templateDepth += 1;
+        // Template contents are inert fragments, not signals from the document.
+        if (templateDepth > 0) return;
         if (tag === "head") headDepth += 1;
-        if (tag === "script" || tag === "style" || tag === "template") ignoredTextDepth += 1;
+        if (tag === "script" || tag === "style") ignoredTextDepth += 1;
 
         if (tag === "html" && htmlLang === undefined) {
           if (Object.hasOwn(attributes, "lang"))
@@ -89,20 +93,25 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
         }
       },
       ontext(value) {
-        if (ignoredTextDepth > 0) return;
+        if (templateDepth > 0 || ignoredTextDepth > 0) return;
         titleCaptures.at(-1)?.chunks.push(value);
         h1Captures.at(-1)?.chunks.push(value);
         openAnchors.at(-1)?.chunks.push(value);
       },
       onclosetag(name) {
         const tag = name.toLowerCase();
+        if (tag === "template") {
+          templateDepth = Math.max(0, templateDepth - 1);
+          return;
+        }
+        if (templateDepth > 0) return;
         if (tag === "title") finishTextCapture(titleCaptures, titles);
         if (tag === "h1") finishTextCapture(h1Captures, h1s);
         if (tag === "a") {
           const anchor = openAnchors.pop();
           if (anchor !== undefined) pendingLinks.push(anchor);
         }
-        if (tag === "script" || tag === "style" || tag === "template") {
+        if (tag === "script" || tag === "style") {
           ignoredTextDepth = Math.max(0, ignoredTextDepth - 1);
         }
         if (tag === "head") headDepth = Math.max(0, headDepth - 1);
