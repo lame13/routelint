@@ -1,7 +1,7 @@
 {
   "name": "routelint",
-  "version": "0.3.0",
-  "description": "Audit the routes, SSR content, links, canonicals, sitemaps, and indexability signals a site actually ships.",
+  "version": "0.3.1",
+  "description": "Find technical SEO problems in your deployed site: broken links, incorrect redirects, empty SSR pages, and indexing conflicts.",
   "type": "module",
   "bin": {
     "routelint": "dist/cli.js"

@@ -94,6 +94,26 @@ describe("crawlSite", () => {
     ]);
   });
 
+  it("does not spend the crawl budget on links inside templates", async () => {
+    const requestedPaths: string[] = [];
+    const origin = await listen((request, response) => {
+      requestedPaths.push(request.url ?? "");
+      response.writeHead(200, { "content-type": "text/html" }).end(
+        request.url === "/"
+          ? `<template><a href="/placeholder">Unused</a></template>
+             <a href="/real">Real page</a>`
+          : "<h1>Real page</h1>",
+      );
+    });
+
+    const result = await crawlSite(crawlOptions(origin, { seeds: ["/"], maxPages: 2 }));
+
+    expect(requestedPaths).toEqual(["/", "/real"]);
+    expect(result.routes.map((route) => route.url)).toEqual([`${origin}/`, `${origin}/real`]);
+    expect(result.routes[0]?.outbound).toEqual([`${origin}/real`]);
+    expect(result.truncated).toBe(false);
+  });
+
   it("respects per-agent robots rules and never discovers links from a secondary snapshot", async () => {
     let requests = 0;
     const origin = await listen((_request, response) => {

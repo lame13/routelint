@@ -2,6 +2,17 @@
 
 All notable changes are documented here. This project follows semantic versioning.
 
+## 0.3.1 - 2026-09-08
+
+### Fixed
+
+- Ignore links, metadata, headings, and base URLs inside HTML `<template>` elements, including nested templates. Unused template content no longer creates phantom crawl routes or false SEO findings.
+
+### Changed
+
+- Rewrite the README and package description with clearer explanations and practical examples.
+- Update the publishing guide to release through a pull request to protected `main`, then publish to npm interactively from the merged commit.
+
 ## 0.3.0 - 2026-08-27
 
 ### Added
