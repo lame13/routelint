@@ -17,6 +17,8 @@ export interface CapturePageOptions {
   readonly timeoutMs: number;
   readonly maxBytes: number;
   readonly maxRedirects: number;
+  /** Pace each HTTP request, including redirect hops, outside the capture time budget. */
+  readonly beforeRequest?: () => Promise<void>;
 }
 
 interface BodyReadResult {
@@ -34,7 +36,7 @@ export async function capturePage(
   assertSafeInteger(options.timeoutMs, "timeoutMs", 1);
   assertSafeInteger(options.maxBytes, "maxBytes", 0);
   assertSafeInteger(options.maxRedirects, "maxRedirects", 0);
-  const startedAt = performance.now();
+  let startedAt = performance.now();
   const redirects: RedirectHop[] = [];
   const secrets = Object.values(options.headers ?? {}).filter((value) => value.length > 0);
   const normalizedRequest = normalizeUrl(requestedUrl, requestedUrl, "keep");
@@ -56,14 +58,32 @@ export async function capturePage(
   let timedOut = false;
   const controller = new AbortController();
   const timeoutMs = options.timeoutMs;
-  const timer = setTimeout(() => {
+  const abort = (): void => {
     timedOut = true;
     controller.abort();
-  }, timeoutMs);
+  };
+  let timer = setTimeout(abort, timeoutMs);
   timer.unref?.();
 
   try {
     for (;;) {
+      if (controller.signal.aborted) throw controller.signal.reason;
+      if (options.beforeRequest !== undefined) {
+        clearTimeout(timer);
+        const waitStartedAt = performance.now();
+        try {
+          await options.beforeRequest();
+        } finally {
+          startedAt += performance.now() - waitStartedAt;
+        }
+        const remainingMs = timeoutMs - (performance.now() - startedAt);
+        if (remainingMs <= 0) {
+          abort();
+          throw controller.signal.reason;
+        }
+        timer = setTimeout(abort, remainingMs);
+        timer.unref?.();
+      }
       const hopStartedAt = performance.now();
       const requestHeaders = new Headers();
       if (new URL(currentUrl).origin === headerOrigin) {

@@ -5,6 +5,12 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 import { BUILTIN_AGENTS, resolveAgent } from "./agents.js";
+import {
+  matchRedirectSource,
+  planRedirectSource,
+  planRedirectTarget,
+  type RedirectSourcePlan,
+} from "./redirects.js";
 import type {
   AuditOptions,
   CrawlLimits,
@@ -39,6 +45,8 @@ const auditRequirementOverrides = {
   requireH1: z.boolean().optional(),
   requireSitemapCoverage: z.boolean().optional(),
   maxDepth: nonNegativeInteger.optional(),
+  maxResponseMs: positiveInteger.optional(),
+  maxRedirectHopMs: positiveInteger.optional(),
 } as const;
 
 const rawConfigSchema = z
@@ -57,6 +65,7 @@ const rawConfigSchema = z
             to: z.string().min(1),
             status: redirectStatus,
             maxHops: positiveInteger.optional(),
+            samples: z.array(z.string()).optional(),
           })
           .strict(),
       )
@@ -73,6 +82,8 @@ const rawConfigSchema = z
         timeoutMs: positiveInteger.optional(),
         maxBytes: positiveInteger.optional(),
         maxRedirects: nonNegativeInteger.optional(),
+        delayMs: nonNegativeInteger.optional(),
+        honorCrawlDelay: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -125,6 +136,8 @@ export interface ConfigOverrides {
   readonly timeoutMs?: number;
   readonly maxBytes?: number;
   readonly maxRedirects?: number;
+  readonly delayMs?: number;
+  readonly honorCrawlDelay?: boolean;
   readonly agents?: readonly string[];
   readonly headers?: Readonly<Record<string, string>>;
   readonly sitemaps?: readonly string[];
@@ -149,6 +162,9 @@ export interface LoadConfigOptions {
   readonly requireConfig?: boolean;
 }
 
+const DEFAULT_DELAY_MS = 0;
+const DEFAULT_HONOR_CRAWL_DELAY = true;
+
 const DEFAULT_LIMITS: CrawlLimits = Object.freeze({
   maxPages: 250,
   maxDepth: 8,
@@ -156,6 +172,8 @@ const DEFAULT_LIMITS: CrawlLimits = Object.freeze({
   timeoutMs: 15_000,
   maxBytes: 2_000_000,
   maxRedirects: 5,
+  delayMs: DEFAULT_DELAY_MS,
+  honorCrawlDelay: DEFAULT_HONOR_CRAWL_DELAY,
 });
 
 const DEFAULT_AUDIT: AuditOptions = Object.freeze({
@@ -228,15 +246,52 @@ function resolveRedirectExpectations(
     } catch {
       throw new Error(`${toLabel} must be an HTTP(S) URL or path without credentials.`);
     }
-    if (from.origin !== base.origin || to.origin !== base.origin) {
-      throw new Error(`redirects[${index}] must stay on the configured origin.`);
+    if (from.origin !== base.origin) {
+      throw new Error(`redirects[${index}] must keep its source on the configured origin.`);
     }
-    if (from.search.length > 0 || to.search.length > 0) {
-      throw new Error(`redirects[${index}] cannot include query strings.`);
+
+    const kind: "exact" | "pattern" = from.href.includes("*") ? "pattern" : "exact";
+    let sourcePlan: RedirectSourcePlan;
+    try {
+      sourcePlan = planRedirectSource(from.href, fromLabel);
+      planRedirectTarget(to.href, toLabel, sourcePlan.placeholders);
+    } catch (error) {
+      if (error instanceof Error) throw error;
+      throw new Error(`redirects[${index}] is invalid.`);
+    }
+
+    if (kind === "exact" && (value.samples?.length ?? 0) > 0) {
+      throw new Error(
+        `redirects[${index}].samples is only supported when from declares a wildcard pattern.`,
+      );
     }
     if (from.href === to.href) {
       throw new Error(`redirects[${index}] cannot redirect a URL to itself.`);
     }
+    if (kind === "pattern" && sourcePlan.placeholders === 0) {
+      throw new Error(`${fromLabel} is not a usable wildcard pattern.`);
+    }
+
+    const samples = (value.samples ?? []).map((sample, sampleIndex) => {
+      const label = `redirects[${index}].samples[${sampleIndex}]`;
+      let url: URL;
+      try {
+        url = parseHttpUrl(new URL(sample, base).href, label);
+      } catch {
+        throw new Error(`${label} must be an HTTP(S) URL or path without credentials.`);
+      }
+      if (url.origin !== base.origin) {
+        throw new Error(`${label} must stay on the configured origin.`);
+      }
+      if (url.pathname.includes("*")) {
+        throw new Error(`${label} must be a concrete URL without wildcards.`);
+      }
+      if (matchRedirectSource(from.href, url.href) === undefined) {
+        throw new Error(`${label} does not match the declared pattern ${value.from}.`);
+      }
+      return url.href;
+    });
+
     const maxHops = value.maxHops ?? 1;
     if (maxHops > maxRedirects) {
       throw new Error(
@@ -248,6 +303,8 @@ function resolveRedirectExpectations(
       to: to.href,
       status: value.status,
       maxHops,
+      ...(kind === "pattern" ? { kind } : {}),
+      ...(samples.length === 0 ? {} : { samples }),
     };
     const existing = resolved.get(expectation.from);
     if (
@@ -258,7 +315,11 @@ function resolveRedirectExpectations(
     ) {
       throw new Error(`redirects[${index}] conflicts with another contract for ${from.href}.`);
     }
-    resolved.set(expectation.from, expectation);
+    const mergedSamples = [...new Set([...(existing?.samples ?? []), ...samples])];
+    resolved.set(expectation.from, {
+      ...expectation,
+      ...(mergedSamples.length === 0 ? {} : { samples: mergedSamples }),
+    });
   }
   return [...resolved.values()].sort((left, right) => left.from.localeCompare(right.from));
 }
@@ -376,6 +437,8 @@ function resolvePathAuditOptions(raw: RawConfig): readonly PathAuditOptions[] {
       ? {}
       : { requireSitemapCoverage: scope.requireSitemapCoverage }),
     ...(scope.maxDepth === undefined ? {} : { maxDepth: scope.maxDepth }),
+    ...(scope.maxResponseMs === undefined ? {} : { maxResponseMs: scope.maxResponseMs }),
+    ...(scope.maxRedirectHopMs === undefined ? {} : { maxRedirectHopMs: scope.maxRedirectHopMs }),
     severities: { ...(scope.severities ?? {}) },
   }));
 }
@@ -417,6 +480,9 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Route
     timeoutMs: overrides.timeoutMs ?? raw.limits?.timeoutMs ?? DEFAULT_LIMITS.timeoutMs,
     maxBytes: overrides.maxBytes ?? raw.limits?.maxBytes ?? DEFAULT_LIMITS.maxBytes,
     maxRedirects: overrides.maxRedirects ?? raw.limits?.maxRedirects ?? DEFAULT_LIMITS.maxRedirects,
+    delayMs: overrides.delayMs ?? raw.limits?.delayMs ?? DEFAULT_DELAY_MS,
+    honorCrawlDelay:
+      overrides.honorCrawlDelay ?? raw.limits?.honorCrawlDelay ?? DEFAULT_HONOR_CRAWL_DELAY,
   };
 
   const audit: AuditOptions = {
@@ -427,6 +493,10 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Route
     requireSitemapCoverage:
       raw.audit?.requireSitemapCoverage ?? DEFAULT_AUDIT.requireSitemapCoverage,
     maxDepth: raw.audit?.maxDepth ?? DEFAULT_AUDIT.maxDepth,
+    ...(raw.audit?.maxResponseMs === undefined ? {} : { maxResponseMs: raw.audit.maxResponseMs }),
+    ...(raw.audit?.maxRedirectHopMs === undefined
+      ? {}
+      : { maxRedirectHopMs: raw.audit.maxRedirectHopMs }),
     severities: { ...(raw.audit?.severities ?? {}) },
     paths: resolvePathAuditOptions(raw),
   };
@@ -502,12 +572,16 @@ agents:
 respectRobots: true
 queryPolicy: drop
 
-# Exact redirect contracts add both the source and destination to the crawl:
+# Redirect contracts add both sides to the crawl:
 # redirects:
 #   - from: /old-pricing
 #     to: /pricing
 #     status: 301
 #     maxHops: 1
+#   - from: /blog/old/*
+#     to: /blog/new/*
+#     status: 308
+#     samples: [/blog/old/hello-world]
 
 limits:
   maxPages: 250
@@ -516,6 +590,8 @@ limits:
   timeoutMs: 15000
   maxBytes: 2000000
   maxRedirects: 5
+  delayMs: 0
+  honorCrawlDelay: true
 
 audit:
   requireTitle: true
@@ -524,6 +600,9 @@ audit:
   requireH1: true
   requireSitemapCoverage: true
   maxDepth: 4
+  # Response-time budgets are opt-in. Uncomment to report slow routes and hops.
+  # maxResponseMs: 1000
+  # maxRedirectHopMs: 500
   severities: {}
   paths: []
 

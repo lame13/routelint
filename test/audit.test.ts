@@ -862,3 +862,194 @@ describe("audit helpers", () => {
     expect(meetsFailureThreshold("info", "warning")).toBe(false);
   });
 });
+
+describe("response-time budgets", () => {
+  it("applies each hop's path budget and severity even when the source has no budget", () => {
+    const output = auditSite(
+      auditInput(
+        [
+          route("/start", {
+            page: snapshot("/start", {
+              finalUrl: absolute("/end"),
+              redirects: [
+                {
+                  url: absolute("/start"),
+                  status: 301,
+                  location: absolute("/middle"),
+                  durationMs: 900,
+                },
+                {
+                  url: absolute("/middle"),
+                  status: 301,
+                  location: absolute("/end"),
+                  durationMs: 900,
+                },
+              ],
+            }),
+          }),
+        ],
+        {
+          options: {
+            ...quietAudit,
+            paths: [
+              {
+                include: ["/middle"],
+                exclude: [],
+                maxRedirectHopMs: 500,
+                severities: { "slow-redirect": "info" },
+              },
+            ],
+          },
+        },
+      ),
+    );
+    expect(output.findings.filter((finding) => finding.code === "slow-redirect")).toEqual([
+      expect.objectContaining({
+        url: absolute("/middle"),
+        severity: "info",
+        evidence: expect.objectContaining({ budgetMs: 500 }),
+      }),
+    ]);
+  });
+
+  const slowHop = {
+    url: absolute("/old"),
+    status: 301,
+    location: absolute("/new"),
+    durationMs: 900,
+  };
+  const routes = [
+    route("/slow", { page: snapshot("/slow", { durationMs: 1_500 }) }),
+    route("/fast", { page: snapshot("/fast", { durationMs: 20 }) }),
+    route("/old", {
+      page: snapshot("/old", {
+        finalUrl: absolute("/new"),
+        redirects: [slowHop],
+      }),
+    }),
+    route("/paused", {
+      page: snapshot("/paused", { completion: "timeout", durationMs: 9_000 }),
+    }),
+  ];
+
+  it("stays silent until a budget is configured", () => {
+    const codes = codesFor(auditInput(routes));
+
+    expect(codes).not.toContain("slow-route");
+    expect(codes).not.toContain("slow-redirect");
+  });
+
+  it("reports routes and redirect hops over their configured budgets", () => {
+    const output = auditSite(
+      auditInput(routes, {
+        options: { ...quietAudit, maxResponseMs: 1_000, maxRedirectHopMs: 500 },
+      }),
+    );
+    const slowRoute = output.findings.filter((finding) => finding.code === "slow-route");
+    const slowRedirect = output.findings.filter((finding) => finding.code === "slow-redirect");
+
+    expect(slowRoute).toEqual([
+      expect.objectContaining({
+        severity: "warning",
+        url: absolute("/slow"),
+        evidence: expect.objectContaining({ durationMs: 1_500, budgetMs: 1_000, status: 200 }),
+      }),
+    ]);
+    expect(slowRedirect).toEqual([
+      expect.objectContaining({
+        severity: "warning",
+        url: absolute("/old"),
+        relatedUrls: [absolute("/new")],
+        evidence: expect.objectContaining({ durationMs: 900, budgetMs: 500, status: 301 }),
+      }),
+    ]);
+    // An incomplete capture already reports its own code instead of a duration budget.
+    const timedOut = auditSite(
+      auditInput(routes, { options: { ...quietAudit, maxResponseMs: 1_000 } }),
+    ).findings;
+    expect(
+      timedOut.some(
+        (finding) => finding.code === "slow-route" && finding.url === absolute("/paused"),
+      ),
+    ).toBe(false);
+    expect(
+      timedOut.some(
+        (finding) => finding.code === "incomplete-fetch" && finding.url === absolute("/paused"),
+      ),
+    ).toBe(true);
+  });
+
+  it("supports path-scoped budgets and per-code severity overrides", () => {
+    const output = auditSite(
+      auditInput(routes, {
+        options: {
+          ...quietAudit,
+          maxResponseMs: 1_000,
+          paths: [
+            {
+              include: ["/slow"],
+              exclude: [],
+              maxResponseMs: 5_000,
+              severities: { "slow-route": "info" },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(output.findings.some((finding) => finding.code === "slow-route")).toBe(false);
+
+    const disabled = auditSite(
+      auditInput(routes, {
+        options: {
+          ...quietAudit,
+          maxResponseMs: 1_000,
+          severities: { "slow-route": "off" },
+        },
+      }),
+    );
+    expect(disabled.findings.some((finding) => finding.code === "slow-route")).toBe(false);
+  });
+});
+
+describe("crawl policy findings", () => {
+  it("records honored crawl delays as informational evidence", () => {
+    const output = auditSite(
+      auditInput([route("/")], {
+        pacing: { delayMs: 1_000, robotsDelaySeconds: 1, clamped: false },
+      }),
+    );
+
+    expect(output.findings.filter((finding) => finding.code === "crawl-policy")).toEqual([
+      expect.objectContaining({
+        severity: "info",
+        evidence: { robotsDelaySeconds: 1, delayMs: 1_000 },
+      }),
+    ]);
+  });
+
+  it("warns when a declared crawl delay had to be capped", () => {
+    const output = auditSite(
+      auditInput([route("/")], {
+        pacing: { delayMs: 10_000, robotsDelaySeconds: 3_600, clamped: true },
+      }),
+    );
+
+    expect(output.findings.filter((finding) => finding.code === "crawl-policy")).toEqual([
+      expect.objectContaining({ severity: "warning" }),
+    ]);
+  });
+
+  it("stays silent when no pacing applies", () => {
+    expect(
+      auditSite(
+        auditInput([route("/")], { pacing: { delayMs: 0, clamped: false } }),
+      ).findings.filter((finding) => finding.code === "crawl-policy"),
+    ).toEqual([]);
+    expect(
+      auditSite(auditInput([route("/")])).findings.filter(
+        (finding) => finding.code === "crawl-policy",
+      ),
+    ).toEqual([]);
+  });
+});

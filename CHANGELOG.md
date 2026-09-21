@@ -2,6 +2,30 @@
 
 All notable changes are documented here. This project follows semantic versioning.
 
+## 0.4.0 - 2026-09-21
+
+### Added
+
+- Opt-in response-time budgets. `audit.maxResponseMs` reports `slow-route` findings and `audit.maxRedirectHopMs` reports `slow-redirect` findings, each carrying the observed duration, the configured budget, and the route or hop involved. Both are disabled until a threshold is configured and can be narrowed or widened per path scope.
+- Redirect pattern contracts. A source may use `*` for one path segment and a trailing `**` for the remaining path; each placeholder in `to` is replaced in order, so `/blog/old/*` → `/blog/new/*` is verified against matching crawl URLs and explicit `samples`. Samples enter the crawl subject to its filters and limits; unfetched samples are unchecked. `redirect-pattern-unmatched` records a pattern without matching sources.
+- Query strings in redirect contracts, and destinations that leave the audited origin. Cross-origin targets are verified through the source's own redirect chain instead of being added to the same-origin crawl.
+- Markdown, CSV, and JUnit report formats. `--format markdown` writes a GitHub step summary, `--format csv` writes a spreadsheet-friendly table of findings, and `--format junit` writes JUnit XML for CI test reporters. Markdown and XML output neutralize report values instead of embedding them as markup.
+- Crawl pacing. `Crawl-delay` and `Request-rate` records in robots.txt now space raw page request starts, including redirect hops and agent comparisons, with the declared delay capped at 10 seconds. `limits.delayMs` and `--delay <duration>` set uncapped explicit minimum spacing, `limits.honorCrawlDelay` and `--ignore-crawl-delay` control whether the declared value is honored, and a `crawl-policy` finding records the pacing that was applied or warns when a declared delay had to be capped. Pacing waits do not consume capture timeout or response-time budgets.
+
+### Changed
+
+- JSON report schema is now version 4. The report reader and diff command remain compatible with schemas 1, 2, and 3.
+- Redirect contract checks are counted per matched source, so `redirectContracts` adds `patterns`, `patternMatches`, and `unmatchedPatterns`, and each check records the pattern it came from.
+- Report configuration snapshots record `delayMs` and `honorCrawlDelay`.
+- The starter and example configurations document the new budgets, pacing options, and pattern contracts.
+
+### Fixed
+
+- Preserve exact query ordering and encoding throughout redirect candidate collection; retain trailing slashes in `**` captures and merge duplicate pattern samples.
+- Redact sensitive values in redirect samples and pattern fields, and preserve per-agent robots delay evidence in serialized reports.
+- Neutralize Markdown formatting and spreadsheet formulas in report values, remove invalid XML characters from JUnit output, and show unmatched patterns even when no concrete checks ran.
+- Apply redirect response-time budgets to each hop's own path scope, compare pacing settings in changed-only reports, and accept `--delay 0`.
+
 ## 0.3.1 - 2026-09-08
 
 ### Fixed

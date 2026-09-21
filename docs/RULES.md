@@ -14,6 +14,8 @@ RouteLint findings use stable codes, a severity, a direct message, and the URLs 
 | `server-error` | error | The final response is a server error. |
 | `unexpected-status` | warning | The final response is outside the normal successful range. |
 | `redirected-route` | warning | A discovered route redirects before returning its final page. |
+| `slow-route` | warning | A complete primary-agent capture exceeded `audit.maxResponseMs`, excluding pacing waits. Disabled unless configured. |
+| `slow-redirect` | warning | A primary-agent redirect hop exceeded `audit.maxRedirectHopMs` for that hop's path scope. Disabled unless configured. |
 | `non-html-route` | info | A discovered URL returned a non-HTML content type. |
 | `agent-incomplete-fetch`, `agent-fetch-mismatch` | warning/error | A secondary agent failed or had a different fetch outcome. |
 | `agent-status-mismatch`, `agent-redirect-mismatch`, `agent-content-type-mismatch` | warning/error | Bot and browser-like requests received different HTTP delivery. |
@@ -33,6 +35,7 @@ Incomplete captures are not treated as indexable and are not passed through meta
 | `redirect-chain` | warning | The observed chain exceeded the declared hop limit. |
 | `redirect-target-unhealthy` | error | The declared destination returned a non-2xx response or was `noindex`. |
 | `redirect-contract-unchecked` | warning | The contract lacked complete source evidence because of limits, robots policy, or a fetch failure. |
+| `redirect-pattern-unmatched` | info | No crawl URL or explicit sample matched a declared pattern. |
 
 A contract source is exempt from the generic `redirected-route` and ordinary page-response findings. Sitemap and link-graph checks still apply because intentional redirects should not remain in sitemaps or internal links. See [REDIRECTS.md](REDIRECTS.md).
 
@@ -86,6 +89,7 @@ A contract source is exempt from the generic `redirected-route` and ordinary pag
 | --- | --- |
 | `sitemap-warning` | A sitemap fetch, XML, recursion, or size issue occurred. |
 | `robots-warning` | robots.txt could not be fetched or parsed completely. |
+| `crawl-policy` | Records honored robots request spacing; warns when a declared delay was capped. |
 | `next-discovery-warning` | A Next.js artifact was missing, ambiguous, or unsupported. |
 | `next-dynamic-route-needs-sample` | A dynamic build pattern has no concrete URL. |
 | `page-budget-reached` | The run stopped adding routes at its configured page limit. Missing-target conclusions become conservative. |

@@ -2,6 +2,7 @@ import { createServer, type RequestListener, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { crawlSite, isAllowedByRobots } from "../src/crawl.js";
+import { redirectContractCandidates } from "../src/redirects.js";
 import type { AgentProfile, CrawlOptions, RobotsFile } from "../src/types.js";
 
 const primary: AgentProfile = {
@@ -318,6 +319,162 @@ describe("crawlSite", () => {
     );
 
     expect(maximumActive).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("request pacing", () => {
+  it("paces redirect hops and agents without counting queued time as response time", async () => {
+    const starts: number[] = [];
+    const origin = await listen((request, response) => {
+      starts.push(performance.now());
+      if (request.url === "/old") {
+        response.writeHead(301, { location: "/new" }).end();
+      } else {
+        response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
+      }
+    });
+    const result = await crawlSite(
+      crawlOptions(origin, {
+        seeds: ["/old"],
+        agents: [primary, secondary],
+        delayMs: 150,
+        timeoutMs: 100,
+      }),
+    );
+    expect(starts).toHaveLength(4);
+    for (let index = 1; index < starts.length; index += 1) {
+      expect((starts[index] ?? 0) - (starts[index - 1] ?? 0)).toBeGreaterThanOrEqual(125);
+    }
+    for (const snapshot of result.routes[0]?.snapshots ?? []) {
+      expect(snapshot.completion).toBe("complete");
+      expect(snapshot.durationMs).toBeLessThan(100);
+      expect(snapshot.redirects[0]?.durationMs).toBeLessThan(100);
+    }
+  });
+
+  it("preserves explicit minimum spacing longer than the robots delay cap", async () => {
+    const origin = await listen((_request, response) => response.end("Page"));
+    const result = await crawlSite(crawlOptions(origin, { seeds: ["/only"], delayMs: 20_000 }));
+    expect(result.pacing).toEqual({ delayMs: 20_000, clamped: false });
+  });
+
+  it("prioritizes pattern samples over concrete targets under a page limit", async () => {
+    const origin = await listen((_request, response) => response.end("Page"));
+    const candidates = redirectContractCandidates([
+      {
+        from: `${origin}/z/*`,
+        to: `${origin}/a`,
+        status: 301,
+        maxHops: 1,
+        kind: "pattern",
+        source: "config",
+        samples: [`${origin}/z/sample`],
+      },
+    ]);
+    const result = await crawlSite(crawlOptions(origin, { candidates, maxPages: 1 }));
+    expect(result.routes.map((route) => route.url)).toEqual([`${origin}/z/sample`]);
+  });
+
+  it("spaces request starts by the configured delay", async () => {
+    const starts: number[] = [];
+    const origin = await listen((_request, response) => {
+      starts.push(Date.now());
+      response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
+    });
+
+    const result = await crawlSite(
+      crawlOptions(origin, { seeds: ["/a", "/b", "/c"], delayMs: 60 }),
+    );
+
+    expect(result.pacing).toEqual({ delayMs: 60, clamped: false });
+    expect(starts).toHaveLength(3);
+    expect((starts.at(-1) ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(90);
+  });
+
+  it("honors a robots.txt crawl delay unless it is explicitly ignored", async () => {
+    const starts: number[] = [];
+    const origin = await listen((_request, response) => {
+      starts.push(Date.now());
+      response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
+    });
+    const robots: RobotsFile = {
+      url: `${origin}/robots.txt`,
+      availability: { state: "available" },
+      groups: [{ agents: ["*"], rules: [], crawlDelaySeconds: 0.06 }],
+      sitemaps: [],
+      warnings: [],
+      crawlDelaySeconds: 0.06,
+    };
+
+    const honored = await crawlSite(
+      crawlOptions(origin, { seeds: ["/a", "/b"], respectRobots: true, robots }),
+    );
+    expect(honored.pacing).toEqual({ delayMs: 60, robotsDelaySeconds: 0.06, clamped: false });
+    expect((starts.at(-1) ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(45);
+
+    starts.length = 0;
+    const ignored = await crawlSite(
+      crawlOptions(origin, {
+        seeds: ["/a", "/b"],
+        respectRobots: true,
+        robots,
+        honorCrawlDelay: false,
+      }),
+    );
+    expect(ignored.pacing).toEqual({ delayMs: 0, clamped: false });
+    expect((starts.at(-1) ?? 0) - (starts[0] ?? 0)).toBeLessThan(45);
+  });
+
+  it("caps an extreme declared crawl delay and reports the cap", async () => {
+    const origin = await listen((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
+    });
+    const robots: RobotsFile = {
+      url: `${origin}/robots.txt`,
+      availability: { state: "available" },
+      groups: [{ agents: ["*"], rules: [], crawlDelaySeconds: 3_600 }],
+      sitemaps: [],
+      warnings: [],
+      crawlDelaySeconds: 3_600,
+    };
+
+    const result = await crawlSite(
+      crawlOptions(origin, { seeds: ["/only"], respectRobots: true, robots }),
+    );
+
+    expect(result.pacing).toEqual({ delayMs: 10_000, robotsDelaySeconds: 3_600, clamped: true });
+  });
+
+  it("keeps the query string of a declared redirect source while discovery drops queries", async () => {
+    const requested: string[] = [];
+    const origin = await listen((_request, response) => {
+      requested.push(_request.url ?? "");
+      response
+        .writeHead(200, { "content-type": "text/html" })
+        .end('<a href="/linked?from=page">Link</a>');
+    });
+
+    const result = await crawlSite(
+      crawlOptions(origin, {
+        seeds: ["/"],
+        queryPolicy: "drop",
+        candidates: [
+          {
+            url: "/legacy?ref=old",
+            depth: 0,
+            sources: [{ kind: "redirect-contract", from: "config", detail: "source" }],
+          },
+        ],
+      }),
+    );
+
+    expect(requested).toContain("/legacy?ref=old");
+    expect(requested).toContain("/linked");
+    expect(result.routes.map((route) => route.url).sort()).toEqual([
+      `${origin}/`,
+      `${origin}/legacy?ref=old`,
+      `${origin}/linked`,
+    ]);
   });
 });
 

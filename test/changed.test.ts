@@ -37,6 +37,28 @@ function report(generatedAt: string, findings: readonly Finding[]): RouteLintRep
 }
 
 describe("changed-only reports", () => {
+  it("rejects different pacing settings while accepting missing legacy defaults", () => {
+    const baseline = report("2026-08-20T00:00:00.000Z", []);
+    const current = {
+      ...baseline,
+      config: { ...baseline.config, delayMs: 0, honorCrawlDelay: true },
+    };
+    expect(() => changedOnlyReport(current, baseline)).not.toThrow();
+    expect(() =>
+      changedOnlyReport(
+        {
+          ...current,
+          config: {
+            ...current.config,
+            delayMs: 100,
+            honorCrawlDelay: false,
+          },
+        },
+        baseline,
+      ),
+    ).toThrow("request delay, crawl delay policy differ");
+  });
+
   it("keeps new and worsened findings while counting unchanged and resolved ones", () => {
     const baseline = report("2026-08-20T00:00:00.000Z", [
       { code: "same", severity: "warning", message: "Before", url: "https://example.test/a" },

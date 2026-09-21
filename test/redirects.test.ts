@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   auditRedirectContracts,
   collectRedirectContracts,
+  interpolateRedirectTarget,
+  matchRedirectSource,
+  planRedirectSource,
+  planRedirectTarget,
   redirectContractCandidates,
 } from "../src/redirects.js";
 import type {
@@ -280,5 +284,221 @@ describe("redirect contract audit", () => {
       unchecked: 1,
       skippedBuildRedirects: 3,
     });
+  });
+});
+
+describe("redirect source patterns", () => {
+  it("preserves trailing and empty segments in a double-wildcard capture", () => {
+    expect(matchRedirectSource(absolute("/docs/**"), absolute("/docs/a/"))).toEqual(["a/"]);
+    expect(matchRedirectSource(absolute("/docs/**"), absolute("/docs/"))).toEqual([""]);
+    expect(matchRedirectSource(absolute("/docs/**"), absolute("/docs"))).toEqual([""]);
+    expect(() => planRedirectSource(absolute("/docs/***"), "from")).toThrow("only * or **");
+    expect(() => planRedirectTarget(absolute("/docs/***"), "to", 1)).toThrow("only * or **");
+  });
+
+  it("captures one segment per wildcard and a whole remainder for a trailing double wildcard", () => {
+    expect(matchRedirectSource(absolute("/blog/old/*"), absolute("/blog/old/hello"))).toEqual([
+      "hello",
+    ]);
+    expect(matchRedirectSource(absolute("/blog/old/*"), absolute("/blog/old/a/b"))).toBeUndefined();
+    expect(matchRedirectSource(absolute("/docs/**"), absolute("/docs/a/b/c"))).toEqual(["a/b/c"]);
+    expect(matchRedirectSource(absolute("/blog/old/*"), absolute("/blog/old"))).toBeUndefined();
+    expect(
+      matchRedirectSource(absolute("/blog/old/*"), absolute("/blog/new/hello")),
+    ).toBeUndefined();
+  });
+
+  it("requires the query string to match exactly and rejects other origins", () => {
+    expect(matchRedirectSource(absolute("/old?ref=legacy"), absolute("/old?ref=legacy"))).toEqual(
+      [],
+    );
+    expect(matchRedirectSource(absolute("/old?ref=legacy"), absolute("/old"))).toBeUndefined();
+    expect(
+      matchRedirectSource(absolute("/old?ref=legacy"), absolute("/old?ref=other")),
+    ).toBeUndefined();
+    expect(
+      matchRedirectSource(absolute("/old/*"), "https://outside.test/old/hello"),
+    ).toBeUndefined();
+  });
+
+  it("substitutes captures into the declared target template in order", () => {
+    expect(interpolateRedirectTarget(absolute("/blog/new/*"), ["hello"])).toBe(
+      absolute("/blog/new/hello"),
+    );
+    expect(interpolateRedirectTarget(absolute("/docs/*/edit"), ["a/b"])).toBe(
+      absolute("/docs/a/b/edit"),
+    );
+    expect(interpolateRedirectTarget("https://outside.test/new/*", ["hello"])).toBe(
+      "https://outside.test/new/hello",
+    );
+    // A target without placeholders is returned unchanged even when captures exist.
+    expect(interpolateRedirectTarget(absolute("/archive"), ["hello"])).toBe(absolute("/archive"));
+  });
+
+  it("rejects patterns that cannot be matched deterministically", () => {
+    expect(() => planRedirectSource(absolute("/old-*.html"), "from")).toThrow(
+      "wildcards must occupy a whole path segment",
+    );
+    expect(() => planRedirectSource(absolute("/docs/**/edit"), "from")).toThrow(
+      "may only use ** as the final path segment",
+    );
+    expect(() => planRedirectTarget("https://outside.test/*/new", "to", 1)).not.toThrow();
+    expect(() => planRedirectTarget(absolute("/a/*/b/*"), "to", 1)).toThrow(
+      "uses 2 wildcards but the source declares 1",
+    );
+  });
+});
+
+describe("pattern contract audit", () => {
+  const pattern: RedirectContract = {
+    from: absolute("/blog/old/*"),
+    to: absolute("/blog/new/*"),
+    status: 308,
+    maxHops: 2,
+    source: "config",
+    kind: "pattern",
+  };
+
+  it("reports an unfetched explicit sample as unchecked", () => {
+    const result = auditRedirectContracts(
+      [],
+      [
+        {
+          ...pattern,
+          samples: [absolute("/blog/old/excluded")],
+        },
+      ],
+    );
+    expect(result.report).toMatchObject({ declared: 1, unchecked: 1, unmatchedPatterns: [] });
+    expect(result.findings[0]).toMatchObject({
+      code: "redirect-contract-unchecked",
+      url: absolute("/blog/old/excluded"),
+    });
+  });
+
+  it("counts sources matching overlapping patterns once", () => {
+    const result = auditRedirectContracts(
+      [route("/blog/old/hello", snapshot("/blog/old/hello"))],
+      [pattern, { ...pattern, from: absolute("/blog/**") }],
+    );
+    expect(result.report).toMatchObject({ declared: 2, patterns: 2, patternMatches: 1 });
+  });
+
+  it("verifies every observed match against its interpolated target", () => {
+    const result = auditRedirectContracts(
+      [
+        route(
+          "/blog/old/hello",
+          snapshot("/blog/old/hello", {
+            redirects: [hop("/blog/old/hello", 308, "/blog/new/hello")],
+            finalUrl: absolute("/blog/new/hello"),
+          }),
+        ),
+        route(
+          "/blog/old/world",
+          snapshot("/blog/old/world", {
+            redirects: [hop("/blog/old/world", 308, "/blog/new/world")],
+            finalUrl: absolute("/blog/new/world"),
+          }),
+        ),
+        route("/unrelated", snapshot("/unrelated")),
+      ],
+      [pattern],
+    );
+
+    expect(result.findings).toEqual([]);
+    expect(result.report).toMatchObject({
+      declared: 2,
+      patterns: 1,
+      patternMatches: 2,
+      verified: 2,
+      failed: 0,
+    });
+    expect(result.report.unmatchedPatterns).toEqual([]);
+    expect(result.sources).toEqual([absolute("/blog/old/hello"), absolute("/blog/old/world")]);
+    expect(result.report.checks[0]).toMatchObject({
+      declaredPattern: absolute("/blog/old/*"),
+      contract: {
+        from: absolute("/blog/old/hello"),
+        to: absolute("/blog/new/hello"),
+        kind: "pattern",
+      },
+    });
+  });
+
+  it("fails a matched source whose redirect lands somewhere else", () => {
+    const result = auditRedirectContracts(
+      [
+        route(
+          "/blog/old/hello",
+          snapshot("/blog/old/hello", {
+            redirects: [hop("/blog/old/hello", 301, "/blog/wrong/hello")],
+            finalUrl: absolute("/blog/wrong/hello"),
+          }),
+        ),
+      ],
+      [pattern],
+    );
+
+    expect(result.findings.map((finding) => finding.code)).toEqual([
+      "redirect-status-mismatch",
+      "redirect-target-mismatch",
+    ]);
+    expect(result.report.failed).toBe(1);
+  });
+
+  it("reports a pattern that no observed URL matched without failing the run", () => {
+    const result = auditRedirectContracts([route("/home", snapshot("/home"))], [pattern]);
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({ code: "redirect-pattern-unmatched", severity: "info" }),
+    ]);
+    expect(result.report).toMatchObject({
+      declared: 0,
+      patterns: 1,
+      patternMatches: 0,
+      unmatchedPatterns: [absolute("/blog/old/*")],
+    });
+  });
+});
+
+describe("cross-origin and query-bearing contracts", () => {
+  it("verifies a source that leaves the audited origin", () => {
+    const away = contract("/moved", "/moved", { to: "https://archive.test/moved" });
+    const result = auditRedirectContracts(
+      [
+        route(
+          "/moved",
+          snapshot("/moved", {
+            redirects: [hop("/moved", 308, "https://archive.test/moved")],
+            finalUrl: "https://archive.test/moved",
+            status: 200,
+          }),
+        ),
+      ],
+      [{ ...away, status: 308 }],
+    );
+
+    expect(result.findings).toEqual([]);
+    expect(result.report.verified).toBe(1);
+    expect(result.report.checks[0]?.observed.targetIndexability).toBe("indexable");
+  });
+
+  it("keeps a query-bearing source and target exact", () => {
+    const result = auditRedirectContracts(
+      [
+        route(
+          "/search?q=old",
+          snapshot("/search?q=old", {
+            redirects: [hop("/search?q=old", 301, "/search")],
+            finalUrl: absolute("/search"),
+          }),
+        ),
+      ],
+      [contract("/search?q=old", "/search")],
+    );
+
+    expect(result.findings).toEqual([]);
+    expect(result.report.verified).toBe(1);
   });
 });

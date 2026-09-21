@@ -23,6 +23,7 @@ export interface FetchRobotsOptions {
 interface MutableRobotsGroup {
   readonly agents: string[];
   readonly rules: RobotsRule[];
+  crawlDelaySeconds?: number;
   hasRuleDirective: boolean;
 }
 
@@ -61,7 +62,35 @@ function robotsUrlFor(value: string | URL): URL {
 
 function commitGroup(groups: RobotsGroup[], group: MutableRobotsGroup | undefined): void {
   if (!group || group.agents.length === 0) return;
-  groups.push({ agents: [...new Set(group.agents)], rules: [...group.rules] });
+  groups.push({
+    agents: [...new Set(group.agents)],
+    rules: [...group.rules],
+    ...(group.crawlDelaySeconds === undefined
+      ? {}
+      : { crawlDelaySeconds: group.crawlDelaySeconds }),
+  });
+}
+
+/**
+ * Read a crawl-delay value in seconds, or the `requests/period` form of Request-rate.
+ * Returns the seconds a crawler should wait between requests, or undefined when unsupported.
+ */
+function parseCrawlDelay(directive: string, value: string): number | undefined {
+  if (directive === "crawl-delay") {
+    const seconds = Number(value);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+  }
+
+  // The common form is `requests/period`, where the period is seconds, `s`, or `m`.
+  const match = /^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?|[sm])$/i.exec(value);
+  if (match === null) return undefined;
+  const requests = Number(match[1]);
+  if (!Number.isFinite(requests) || requests <= 0) return undefined;
+  const period = (match[2] ?? "").toLowerCase();
+  const periodSeconds = period === "m" ? 60 : period === "s" ? 1 : Number(period);
+  if (!Number.isFinite(periodSeconds) || periodSeconds <= 0) return undefined;
+  const seconds = periodSeconds / requests;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
 }
 
 function withoutComment(line: string): string {
@@ -123,12 +152,40 @@ export function parseRobotsText(text: string, robotsUrl: string | URL): Discover
       continue;
     }
 
+    if (directive === "crawl-delay" || directive === "request-rate") {
+      if (!value) continue;
+      if (current) current.hasRuleDirective = true;
+      const seconds = parseCrawlDelay(directive, value);
+      if (seconds === undefined) {
+        warnings.push(
+          directive === "crawl-delay"
+            ? "Ignored a Crawl-delay value that is not a positive number of seconds."
+            : "Ignored a Request-rate value that is not written as requests per second or minute.",
+        );
+        continue;
+      }
+      if (current === undefined) continue;
+      const existing = current.crawlDelaySeconds;
+      current.crawlDelaySeconds = existing === undefined ? seconds : Math.max(existing, seconds);
+      continue;
+    }
+
     // Extension records such as Crawl-delay still end the user-agent preamble.
     if (current) current.hasRuleDirective = true;
   }
 
   commitGroup(groups, current);
-  return { url, availability: { state: "available" }, groups, sitemaps: [...sitemapSet], warnings };
+  const declaredDelays = groups
+    .map((group) => group.crawlDelaySeconds)
+    .filter((seconds): seconds is number => seconds !== undefined);
+  return {
+    url,
+    availability: { state: "available" },
+    groups,
+    sitemaps: [...sitemapSet],
+    warnings,
+    ...(declaredDelays.length === 0 ? {} : { crawlDelaySeconds: Math.max(...declaredDelays) }),
+  };
 }
 
 async function readLimitedText(response: Response, maxBytes: number): Promise<string> {
@@ -347,6 +404,45 @@ function ruleExpression(pattern: string): RegExp | undefined {
   }
 }
 
+/** Select the groups whose user-agent tokens match the requested user agent most specifically. */
+function selectRobotsGroups(robots: RobotsFile, userAgent: string): readonly RobotsGroup[] {
+  const normalizedAgent = userAgent.toLowerCase();
+  let longestAgentMatch = -1;
+  let matchingGroups: RobotsGroup[] = [];
+  for (const group of robots.groups) {
+    const groupMatch = group.agents.reduce((best, token) => {
+      const normalizedToken = token.toLowerCase();
+      if (normalizedToken === "*") return Math.max(best, 0);
+      return normalizedAgent.includes(normalizedToken)
+        ? Math.max(best, normalizedToken.length)
+        : best;
+    }, -1);
+    if (groupMatch < longestAgentMatch) continue;
+    if (groupMatch > longestAgentMatch) {
+      longestAgentMatch = groupMatch;
+      matchingGroups = [];
+    }
+    if (groupMatch >= 0) matchingGroups.push(group);
+  }
+  return matchingGroups;
+}
+
+/**
+ * Seconds to wait between requests for one user agent, from Crawl-delay or Request-rate.
+ * Unavailable or missing robots.txt yields no pacing requirement.
+ */
+export function robotsCrawlDelaySeconds(
+  robots: RobotsFile | undefined,
+  userAgent: string,
+): number | undefined {
+  if (robots === undefined) return undefined;
+  if (resolveRobotsAvailability(robots).state !== "available") return undefined;
+  const delays = selectRobotsGroups(robots, userAgent)
+    .map((group) => group.crawlDelaySeconds)
+    .filter((seconds): seconds is number => seconds !== undefined);
+  return delays.length === 0 ? undefined : Math.max(...delays);
+}
+
 /** Resolve robots Allow/Disallow precedence for one user agent and URL. */
 export function isRobotsAllowed(
   robots: RobotsFile,
@@ -359,26 +455,8 @@ export function isRobotsAllowed(
   const path = matchingPath(value, robots.url);
   if (path === undefined) return false;
 
-  const normalizedAgent = userAgent.toLowerCase();
-  let longestAgentMatch = -1;
-  const matchingGroups: RobotsGroup[] = [];
-  for (const group of robots.groups) {
-    const groupMatch = group.agents.reduce((best, token) => {
-      const normalizedToken = token.toLowerCase();
-      if (normalizedToken === "*") return Math.max(best, 0);
-      return normalizedAgent.includes(normalizedToken)
-        ? Math.max(best, normalizedToken.length)
-        : best;
-    }, -1);
-    if (groupMatch < longestAgentMatch) continue;
-    if (groupMatch > longestAgentMatch) {
-      longestAgentMatch = groupMatch;
-      matchingGroups.length = 0;
-    }
-    if (groupMatch >= 0) matchingGroups.push(group);
-  }
-
-  if (longestAgentMatch < 0) return true;
+  const matchingGroups = selectRobotsGroups(robots, userAgent);
+  if (matchingGroups.length === 0) return true;
   let winningRule: { readonly allow: boolean; readonly specificity: number } | undefined;
   for (const group of matchingGroups) {
     for (const rule of group.rules) {

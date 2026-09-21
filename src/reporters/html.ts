@@ -346,14 +346,20 @@ function renderRedirectContracts(report: RouteLintReport): string {
   const contracts = report.redirectContracts;
   if (
     contracts === undefined ||
-    (contracts.declared === 0 && contracts.skippedBuildRedirects === 0)
+    (contracts.declared === 0 &&
+      contracts.skippedBuildRedirects === 0 &&
+      (contracts.patterns ?? 0) === 0)
   ) {
     return "";
   }
   const rows = contracts.checks
     .map(
       (check) => `<tr>
-        <th scope="row"><code class="url-value">${escapeHtml(check.contract.from)}</code><p class="compact muted">${check.contract.source === "config" ? "Config" : "Next.js build"}</p></th>
+        <th scope="row"><code class="url-value">${escapeHtml(check.contract.from)}</code><p class="compact muted">${check.contract.source === "config" ? "Config" : "Next.js build"}${
+          check.declaredPattern === undefined
+            ? ""
+            : ` · matches <code class="url-value">${escapeHtml(check.declaredPattern)}</code>`
+        }</p></th>
         <td><strong>${escapeHtml(check.contract.status)}</strong> → <code class="url-value">${escapeHtml(check.contract.to)}</code><p class="compact muted">At most ${escapeHtml(check.contract.maxHops)} hop${check.contract.maxHops === 1 ? "" : "s"}</p></td>
         <td>${redirectObservedMarkup(check)}</td>
         <td>HTTP ${escapeHtml(check.observed.finalStatus ?? "—")} · ${escapeHtml(check.observed.targetIndexability)}</td>
@@ -367,7 +373,7 @@ function renderRedirectContracts(report: RouteLintReport): string {
     .join("\n");
   const content =
     rows.length === 0
-      ? '<div class="empty-state">No configured contracts or eligible exact Next.js redirects were available for checks.</div>'
+      ? '<div class="empty-state">No concrete redirect sources were available for checks.</div>'
       : `<div class="table-scroll"><table>
           <thead><tr><th scope="col">Source</th><th scope="col">Expected</th><th scope="col">Observed chain</th><th scope="col">Destination</th><th scope="col">Result</th></tr></thead>
           <tbody>${rows}</tbody>
@@ -376,9 +382,17 @@ function renderRedirectContracts(report: RouteLintReport): string {
     contracts.skippedBuildRedirects === 0
       ? ""
       : ` ${escapeHtml(contracts.skippedBuildRedirects)} Next.js definitions were outside contract scope and remain inventory-only.`;
+  const patternSummary =
+    (contracts.patterns ?? 0) === 0
+      ? ""
+      : ` ${escapeHtml(contracts.patterns ?? 0)} pattern contract${(contracts.patterns ?? 0) === 1 ? "" : "s"} matched ${escapeHtml(contracts.patternMatches ?? 0)} observed source${(contracts.patternMatches ?? 0) === 1 ? "" : "s"}${
+          (contracts.unmatchedPatterns?.length ?? 0) === 0
+            ? ""
+            : `; ${escapeHtml(contracts.unmatchedPatterns?.length ?? 0)} pattern${(contracts.unmatchedPatterns?.length ?? 0) === 1 ? "" : "s"} matched nothing`
+        }.`;
   return `<section aria-labelledby="redirect-contracts-heading">
     <h2 id="redirect-contracts-heading">Redirect contracts</h2>
-    <p class="section-note">${escapeHtml(contracts.verified)} of ${escapeHtml(contracts.declared)} contracts verified. ${escapeHtml(contracts.failed)} failed and ${escapeHtml(contracts.unchecked)} could not be checked.${skippedSummary}</p>
+    <p class="section-note">${escapeHtml(contracts.verified)} of ${escapeHtml(contracts.declared)} contracts verified. ${escapeHtml(contracts.failed)} failed and ${escapeHtml(contracts.unchecked)} could not be checked.${patternSummary}${skippedSummary}</p>
     ${content}
   </section>`;
 }

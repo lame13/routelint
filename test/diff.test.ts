@@ -306,7 +306,7 @@ describe("report validation", () => {
 
   it.each([
     [null, "report"],
-    [{ ...report(), schemaVersion: "4" }, "schemaVersion"],
+    [{ ...report(), schemaVersion: "5" }, "schemaVersion"],
     [
       (() => {
         const { summary: _summary, ...missingSummary } = report();

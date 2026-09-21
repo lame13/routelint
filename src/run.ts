@@ -193,6 +193,7 @@ export async function runRouteLint(config: RouteLintConfig): Promise<RouteLintRe
     skippedBuildRedirects: redirectCollection.skippedBuildRedirects,
     options: config.audit,
     truncated: crawled.truncated,
+    pacing: crawled.pacing,
   });
 
   const report: RouteLintReport = {
@@ -215,6 +216,8 @@ export async function runRouteLint(config: RouteLintConfig): Promise<RouteLintRe
       timeoutMs: config.limits.timeoutMs,
       maxBytes: config.limits.maxBytes,
       maxRedirects: config.limits.maxRedirects,
+      delayMs: config.limits.delayMs ?? 0,
+      honorCrawlDelay: config.limits.honorCrawlDelay ?? true,
       rendered: config.rendered?.enabled ?? false,
       ...(config.rendered === undefined
         ? {}
