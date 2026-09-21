@@ -34,6 +34,8 @@ interface CheckCliOptions {
   readonly timeout?: number;
   readonly maxBytes?: number;
   readonly maxRedirects?: number;
+  readonly delay?: number;
+  readonly ignoreCrawlDelay?: boolean;
   readonly agent?: readonly string[];
   readonly header?: readonly string[];
   readonly sitemap?: readonly string[];
@@ -104,7 +106,7 @@ function addCheckOptions(command: Command): Command {
     .option("-c, --config <file>", "read YAML or JSON config")
     .addOption(
       new Option("-f, --format <format>", "report format")
-        .choices(["terminal", "json", "sarif", "html"])
+        .choices(["terminal", "json", "sarif", "html", "markdown", "csv", "junit"])
         .default("terminal"),
     )
     .option("-o, --output <file>", "write the report to a file")
@@ -120,6 +122,8 @@ function addCheckOptions(command: Command): Command {
     .option("--timeout <duration>", "timeout for each request", duration)
     .option("--max-bytes <size>", "maximum HTML bytes per response", bytes)
     .option("--max-redirects <count>", "maximum redirect hops", integer)
+    .option("--delay <duration>", "minimum spacing between page request starts", settleDuration)
+    .option("--ignore-crawl-delay", "ignore Crawl-delay and Request-rate records in robots.txt")
     .option("--agent <name-or-user-agent>", "repeat for bot-delivery comparison", collect)
     .option("--header <name:value>", "repeat for preview credentials", collect)
     .option("--sitemap <url>", "repeat to override sitemap discovery", collect)
@@ -144,6 +148,8 @@ function overrides(baseUrl: string | undefined, options: CheckCliOptions): Confi
     ...(options.timeout === undefined ? {} : { timeoutMs: options.timeout }),
     ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
     ...(options.maxRedirects === undefined ? {} : { maxRedirects: options.maxRedirects }),
+    ...(options.delay === undefined ? {} : { delayMs: options.delay }),
+    ...(options.ignoreCrawlDelay === true ? { honorCrawlDelay: false } : {}),
     ...(options.agent === undefined ? {} : { agents: options.agent }),
     ...(options.header === undefined ? {} : { headers: parseHeaderOptions(options.header) }),
     ...(options.sitemap === undefined ? {} : { sitemaps: options.sitemap }),

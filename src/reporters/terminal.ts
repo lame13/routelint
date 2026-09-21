@@ -164,6 +164,7 @@ export function renderTerminalReport(
   }
   if (
     (report.redirectContracts?.declared ?? 0) > 0 ||
+    (report.redirectContracts?.patterns ?? 0) > 0 ||
     (report.redirectContracts?.skippedBuildRedirects ?? 0) > 0
   ) {
     const contracts = report.redirectContracts;
@@ -172,8 +173,16 @@ export function renderTerminalReport(
         contracts.skippedBuildRedirects === 0
           ? ""
           : `, ${contracts.skippedBuildRedirects} Next.js definitions outside contract scope`;
+      const patterns =
+        (contracts.patterns ?? 0) === 0
+          ? ""
+          : `, ${plural(contracts.patterns ?? 0, "pattern contract")} matched ${contracts.patternMatches ?? 0} source${(contracts.patternMatches ?? 0) === 1 ? "" : "s"}`;
+      const unmatched =
+        (contracts.unmatchedPatterns?.length ?? 0) === 0
+          ? ""
+          : `, ${plural(contracts.unmatchedPatterns?.length ?? 0, "pattern")} unmatched`;
       lines.push(
-        `Redirect contracts: ${contracts.verified}/${contracts.declared} verified, ${contracts.failed} failed, ${contracts.unchecked} unchecked${skipped}`,
+        `Redirect contracts: ${contracts.verified}/${contracts.declared} verified, ${contracts.failed} failed, ${contracts.unchecked} unchecked${patterns}${unmatched}${skipped}`,
       );
     }
   }

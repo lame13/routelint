@@ -89,6 +89,12 @@ function assertComparable(current: RouteLintReport, baseline: RouteLintReport): 
     ["request timeout", current.config.timeoutMs, baseline.config.timeoutMs],
     ["response byte limit", current.config.maxBytes, baseline.config.maxBytes],
     ["redirect limit", current.config.maxRedirects, baseline.config.maxRedirects],
+    ["request delay", current.config.delayMs ?? 0, baseline.config.delayMs ?? 0],
+    [
+      "crawl delay policy",
+      current.config.honorCrawlDelay ?? true,
+      baseline.config.honorCrawlDelay ?? true,
+    ],
     ["rendered evidence setting", current.config.rendered, baseline.config.rendered],
     [
       "rendered concurrency",

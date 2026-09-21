@@ -1,6 +1,6 @@
 export type Severity = "error" | "warning" | "info";
 export type RuleSeverity = Severity | "off";
-export type ReportFormat = "terminal" | "json" | "sarif" | "html";
+export type ReportFormat = "terminal" | "json" | "sarif" | "html" | "markdown" | "csv" | "junit";
 export type QueryPolicy = "drop" | "keep";
 export type RedirectStatus = 301 | 302 | 303 | 307 | 308;
 export type PageCompletion =
@@ -60,12 +60,20 @@ export interface BuildRedirect {
   readonly conditional?: boolean;
 }
 
-/** An exact redirect behavior declared by configuration. */
+/**
+ * A redirect behavior declared by configuration. Exact contracts name one source URL;
+ * pattern contracts match the concrete URLs the crawl observes.
+ */
 export interface RedirectExpectation {
   readonly from: string;
+  /** A concrete destination, or a template whose wildcards are replaced in order. */
   readonly to: string;
   readonly status: RedirectStatus;
   readonly maxHops: number;
+  /** Absent means an exact source URL. Pattern contracts keep their wildcards intact. */
+  readonly kind?: "exact" | "pattern";
+  /** Concrete sources that force a pattern contract into the crawl. */
+  readonly samples?: readonly string[];
 }
 
 export type RedirectContractSource = "config" | "next-build";
@@ -73,6 +81,8 @@ export type RedirectContractSource = "config" | "next-build";
 /** An effective redirect expectation, including its source of truth. */
 export interface RedirectContract extends RedirectExpectation {
   readonly source: RedirectContractSource;
+  /** The declared pattern when this contract was derived from one. */
+  readonly declaredPattern?: string;
 }
 
 export type RedirectContractOutcome = "verified" | "failed" | "unchecked";
@@ -92,10 +102,18 @@ export interface RedirectContractCheck {
   readonly observed: RedirectContractObservation;
   readonly outcome: RedirectContractOutcome;
   readonly findingCodes: readonly string[];
+  /** The declared pattern source when this check audited one of its matches. */
+  readonly declaredPattern?: string;
 }
 
 export interface RedirectContractReport {
   readonly declared: number;
+  /** Declared pattern contracts, counted once each. */
+  readonly patterns?: number;
+  /** Sources matched by at least one pattern contract. */
+  readonly patternMatches?: number;
+  /** Declared patterns that no observed URL matched. */
+  readonly unmatchedPatterns?: readonly string[];
   readonly verified: number;
   readonly failed: number;
   readonly unchecked: number;
@@ -125,6 +143,8 @@ export interface RobotsRule {
 export interface RobotsGroup {
   readonly agents: readonly string[];
   readonly rules: readonly RobotsRule[];
+  /** Seconds between requests from Crawl-delay or Request-rate, normalized to one value. */
+  readonly crawlDelaySeconds?: number;
 }
 
 export type RobotsUnavailableReason =
@@ -149,6 +169,8 @@ export interface RobotsFile {
   readonly groups: readonly RobotsGroup[];
   readonly sitemaps: readonly string[];
   readonly warnings: readonly string[];
+  /** The strictest Crawl-delay or Request-rate declared for any group. */
+  readonly crawlDelaySeconds?: number;
 }
 
 /** A current discovery result always records whether robots.txt was usable. */
@@ -323,6 +345,8 @@ export interface ReportConfigSnapshot {
   readonly timeoutMs?: number;
   readonly maxBytes?: number;
   readonly maxRedirects?: number;
+  readonly delayMs?: number;
+  readonly honorCrawlDelay?: boolean;
   readonly rendered?: boolean;
   readonly renderedConcurrency?: number;
   readonly renderedTimeoutMs?: number;
@@ -340,6 +364,10 @@ export interface CrawlLimits {
   readonly timeoutMs: number;
   readonly maxBytes: number;
   readonly maxRedirects: number;
+  /** Minimum spacing between request starts. Absent means no configured delay. */
+  readonly delayMs?: number;
+  /** Honor Crawl-delay and Request-rate records while robots rules are respected. */
+  readonly honorCrawlDelay?: boolean;
 }
 
 export interface CrawlOptions extends CrawlLimits {
@@ -370,6 +398,10 @@ export interface AuditOptions {
   readonly requireH1: boolean;
   readonly requireSitemapCoverage: boolean;
   readonly maxDepth: number;
+  /** Report routes that took longer than this to capture. Absent disables the check. */
+  readonly maxResponseMs?: number;
+  /** Report redirect hops that took longer than this. Absent disables the check. */
+  readonly maxRedirectHopMs?: number;
   readonly severities?: Readonly<Record<string, RuleSeverity>>;
   readonly paths?: readonly PathAuditOptions[];
 }
@@ -383,6 +415,8 @@ export interface PathAuditOptions {
   readonly requireH1?: boolean;
   readonly requireSitemapCoverage?: boolean;
   readonly maxDepth?: number;
+  readonly maxResponseMs?: number;
+  readonly maxRedirectHopMs?: number;
   readonly severities?: Readonly<Record<string, RuleSeverity>>;
 }
 

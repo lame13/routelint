@@ -81,6 +81,37 @@ function html(origin: string, path: string, body = ""): string {
 }
 
 describe("runRouteLint", () => {
+  it("keeps exact redirect query ordering and encoding through candidate merging", async () => {
+    const from = "/old?z=first&a=hello%20world";
+    const to = "/new?z=last&a=hello%20world";
+    const requested: string[] = [];
+    const origin = await listen((request, response) => {
+      const path = request.url ?? "/";
+      requested.push(path);
+      if (path === "/robots.txt" || path === "/sitemap.xml") {
+        response.writeHead(404).end();
+      } else if (path === from) {
+        response.writeHead(301, { location: to }).end();
+      } else {
+        response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
+      }
+    });
+    const report = await runRouteLint({
+      ...config(`${origin}/`),
+      redirects: [
+        {
+          from: `${origin}${from}`,
+          to: `${origin}${to}`,
+          status: 301,
+          maxHops: 1,
+        },
+      ],
+    });
+    expect(requested).toContain(from);
+    expect(requested).toContain(to);
+    expect(report.redirectContracts).toMatchObject({ verified: 1, unchecked: 0, failed: 0 });
+  });
+
   it("discovers robots and sitemaps, crawls SSR HTML, and audits the resulting graph", async () => {
     const requestedPaths: string[] = [];
     const requestsWithoutPreviewHeader: string[] = [];
@@ -154,8 +185,8 @@ describe("runRouteLint", () => {
     const findingCodes = report.findings.map((finding) => finding.code);
 
     expect(report).toMatchObject({
-      schemaVersion: "3",
-      toolVersion: "0.3.1",
+      schemaVersion: "4",
+      toolVersion: "0.4.0",
       baseUrl: `${origin}/`,
       truncated: false,
       config: {
@@ -376,6 +407,86 @@ describe("runRouteLint", () => {
       renderedTimeoutMs: 1_000,
       renderedSettleMs: 0,
     });
+  });
+
+  it("verifies pattern redirect contracts and paces requests when robots.txt asks for it", async () => {
+    const requested: string[] = [];
+    let origin = "";
+    origin = await listen((request, response) => {
+      const path = request.url ?? "/";
+      requested.push(path);
+      if (path === "/robots.txt") {
+        response
+          .writeHead(200, { "content-type": "text/plain" })
+          .end(`User-agent: *\nCrawl-delay: 0.05\nSitemap: ${origin}/sitemap.xml\n`);
+        return;
+      }
+      if (path === "/sitemap.xml") {
+        response
+          .writeHead(200, { "content-type": "application/xml" })
+          .end(
+            `<urlset><url><loc>${origin}/blog/old/hello</loc></url><url><loc>${origin}/</loc></url></urlset>`,
+          );
+        return;
+      }
+      if (path === "/blog/old/hello") {
+        response.writeHead(308, { location: "/blog/new/hello" }).end();
+        return;
+      }
+      response
+        .writeHead(200, { "content-type": "text/html; charset=utf-8" })
+        .end(html(origin, path));
+    });
+
+    const startedAt = Date.now();
+    const report = await runRouteLint({
+      ...config(`${origin}/`),
+      redirects: [
+        {
+          from: `${origin}/blog/old/*`,
+          to: `${origin}/blog/new/*`,
+          status: 308,
+          maxHops: 2,
+          kind: "pattern",
+          samples: [`${origin}/blog/old/hello`],
+        },
+      ],
+    });
+
+    expect(report.schemaVersion).toBe("4");
+    expect(report.redirectContracts).toMatchObject({
+      patterns: 1,
+      patternMatches: 1,
+      verified: 1,
+      failed: 0,
+      unmatchedPatterns: [],
+    });
+    expect(report.redirectContracts?.checks[0]).toMatchObject({
+      declaredPattern: `${origin}/blog/old/*`,
+      contract: {
+        from: `${origin}/blog/old/hello`,
+        to: `${origin}/blog/new/hello`,
+        kind: "pattern",
+      },
+      outcome: "verified",
+    });
+    // The matched source is governed by its contract, not the generic redirect warning.
+    expect(
+      report.findings.some(
+        (finding) =>
+          finding.code === "redirected-route" && finding.url === `${origin}/blog/old/hello`,
+      ),
+    ).toBe(false);
+    expect(report.config.delayMs).toBe(0);
+    expect(report.config.honorCrawlDelay).toBe(true);
+    expect(report.findings.find((finding) => finding.code === "crawl-policy")).toMatchObject({
+      severity: "info",
+      evidence: { robotsDelaySeconds: 0.05, delayMs: 50 },
+    });
+    // Requests are paced instead of firing at once, so the run cannot finish faster than the delay.
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(50);
+    expect(requested).toContain("/blog/old/hello");
+    expect(requested).toContain("/blog/new/hello");
   });
 });
 

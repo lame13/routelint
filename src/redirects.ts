@@ -21,10 +21,134 @@ export interface RedirectContractCollection {
 export interface RedirectContractAudit {
   readonly findings: readonly Finding[];
   readonly report: RedirectContractReport;
+  /** Concrete source URLs whose redirect behavior a contract governs. */
+  readonly sources: readonly string[];
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const NEXT_PATTERN_TOKEN = /[:*()[\]{}\\]/u;
+const WILDCARD_SEGMENT = /^\*{1,2}$/u;
+
+/**
+ * A source pattern is matched segment by segment. `*` captures one path segment and a
+ * trailing `**` captures every remaining segment. Query strings must match exactly.
+ */
+export interface RedirectSourcePlan {
+  readonly segments: readonly string[];
+  /** Number of capture placeholders in the source pattern. */
+  readonly placeholders: number;
+  /** True when the final segment is `**`. */
+  readonly openEnded: boolean;
+  readonly search: string;
+}
+
+function pathSegments(url: URL): readonly string[] {
+  return url.pathname.split("/").slice(1);
+}
+
+function wildcardInUrlSyntax(url: URL, label: string): void {
+  if (url.protocol.includes("*") || url.host.includes("*")) {
+    throw new Error(`${label} cannot use wildcards in the protocol, host, or port.`);
+  }
+  if (url.search.includes("*")) {
+    throw new Error(`${label} cannot use wildcards in its query string.`);
+  }
+}
+
+/** Validate a declared source pattern or exact URL and describe its capture plan. */
+export function planRedirectSource(source: string, label: string): RedirectSourcePlan {
+  const url = new URL(source);
+  wildcardInUrlSyntax(url, label);
+  const segments = pathSegments(url);
+  let placeholders = 0;
+  let openEnded = false;
+  for (const [index, segment] of segments.entries()) {
+    if (!segment.includes("*")) continue;
+    if (!WILDCARD_SEGMENT.test(segment)) {
+      throw new Error(`${label} wildcards must occupy a whole path segment and use only * or **.`);
+    }
+    if (segment.length > 1 && index !== segments.length - 1) {
+      throw new Error(`${label} may only use ** as the final path segment.`);
+    }
+    if (segment.length > 1) openEnded = true;
+    placeholders += 1;
+  }
+  return { segments, placeholders, openEnded, search: url.search };
+}
+
+/** Validate a declared target template against the placeholders its source provides. */
+export function planRedirectTarget(
+  target: string,
+  label: string,
+  sourcePlaceholders: number,
+): number {
+  const url = new URL(target);
+  wildcardInUrlSyntax(url, label);
+  let placeholders = 0;
+  for (const segment of pathSegments(url)) {
+    if (!segment.includes("*")) continue;
+    if (!WILDCARD_SEGMENT.test(segment)) {
+      throw new Error(`${label} wildcards must occupy a whole path segment and use only * or **.`);
+    }
+    placeholders += 1;
+  }
+  if (placeholders > sourcePlaceholders) {
+    throw new Error(
+      `${label} uses ${placeholders} wildcard${placeholders === 1 ? "" : "s"} but the source declares ${sourcePlaceholders}.`,
+    );
+  }
+  return placeholders;
+}
+
+/**
+ * Match one concrete URL against a declared source pattern.
+ * Returns the captured values in placeholder order, or undefined when the URL does not match.
+ */
+export function matchRedirectSource(
+  pattern: string,
+  candidate: string,
+): readonly string[] | undefined {
+  const patternUrl = new URL(pattern);
+  const candidateUrl = new URL(candidate);
+  if (patternUrl.origin !== candidateUrl.origin) return undefined;
+  if (patternUrl.search !== candidateUrl.search) return undefined;
+  const patternSegments = pathSegments(patternUrl);
+  const candidateSegments = pathSegments(candidateUrl);
+  const captures: string[] = [];
+  for (const [index, segment] of patternSegments.entries()) {
+    if (WILDCARD_SEGMENT.test(segment)) {
+      if (segment.length === 1) {
+        const value = candidateSegments[index];
+        if (value === undefined || value.length === 0) return undefined;
+        captures.push(value);
+        continue;
+      }
+      const rest = candidateSegments.slice(index);
+      captures.push(rest.join("/"));
+      return captures;
+    }
+    if (candidateSegments[index] !== segment) return undefined;
+  }
+  return patternSegments.length === candidateSegments.length ? captures : undefined;
+}
+
+/** Replace each target placeholder with the captured value in order. */
+export function interpolateRedirectTarget(target: string, captures: readonly string[]): string {
+  const url = new URL(target);
+  if (!url.pathname.includes("*")) return url.href;
+  let cursor = 0;
+  const pathname = url.pathname
+    .split("/")
+    .map((segment) => (WILDCARD_SEGMENT.test(segment) ? (captures[cursor++] ?? segment) : segment))
+    .join("/");
+  url.pathname = pathname;
+  return url.href;
+}
+
+/** True when a declared redirect source contains a wildcard placeholder. */
+export function isRedirectPattern(value: string): boolean {
+  return value.includes("*");
+}
 
 function compareContracts(left: RedirectContract, right: RedirectContract): number {
   return left.from.localeCompare(right.from) || left.source.localeCompare(right.source);
@@ -115,30 +239,68 @@ export function collectRedirectContracts(
 export function redirectContractCandidates(
   contracts: readonly RedirectContract[],
 ): readonly RouteCandidate[] {
-  return contracts.flatMap((contract) => [
-    {
-      url: contract.from,
-      depth: 0,
-      sources: [
+  return contracts.flatMap((contract) => {
+    if (contract.kind === "pattern") {
+      const samples: RouteCandidate[] = (contract.samples ?? []).map((sample) => ({
+        url: sample,
+        depth: 0,
+        sources: [
+          {
+            kind: "redirect-contract" as const,
+            from: contract.from,
+            detail: "sample",
+          },
+        ],
+      }));
+      // A template target has to be interpolated first, so only a concrete one is crawled.
+      if (contract.to.includes("*")) return samples;
+      if (new URL(contract.from).origin !== new URL(contract.to).origin) return samples;
+      return [
+        ...samples,
         {
-          kind: "redirect-contract" as const,
-          from: contract.source,
-          detail: "source",
+          url: contract.to,
+          depth: 0,
+          sources: [
+            {
+              kind: "redirect-contract" as const,
+              from: contract.from,
+              detail: "target",
+            },
+          ],
         },
-      ],
-    },
-    {
-      url: contract.to,
-      depth: 0,
-      sources: [
-        {
-          kind: "redirect-contract" as const,
-          from: contract.from,
-          detail: "target",
-        },
-      ],
-    },
-  ]);
+      ];
+    }
+
+    const candidates: RouteCandidate[] = [
+      {
+        url: contract.from,
+        depth: 0,
+        sources: [
+          {
+            kind: "redirect-contract" as const,
+            from: contract.source,
+            detail: "source",
+          },
+        ],
+      },
+    ];
+    // A cross-origin destination is verified through the source's own redirect chain.
+    if (new URL(contract.from).origin !== new URL(contract.to).origin) return candidates;
+    return [
+      ...candidates,
+      {
+        url: contract.to,
+        depth: 0,
+        sources: [
+          {
+            kind: "redirect-contract" as const,
+            from: contract.from,
+            detail: "target",
+          },
+        ],
+      },
+    ];
+  });
 }
 
 function primarySnapshot(route: RouteNode | undefined): PageSnapshot | undefined {
@@ -308,16 +470,67 @@ export function auditRedirectContracts(
   skippedBuildRedirects = 0,
 ): RedirectContractAudit {
   const byUrl = new Map(routes.map((route) => [route.url, route]));
-  const audited = contracts.map((contract) => auditContract(contract, byUrl));
-  const checks = audited.map((result) => result.check);
+  const checks: RedirectContractCheck[] = [];
+  const findings: Finding[] = [];
+  const sources = new Set<string>();
+  const unmatchedPatterns: string[] = [];
+  let patterns = 0;
+  const patternSources = new Set<string>();
+
+  for (const contract of contracts) {
+    if (contract.kind !== "pattern") {
+      sources.add(contract.from);
+      const result = auditContract(contract, byUrl);
+      checks.push(result.check);
+      findings.push(...result.findings);
+      continue;
+    }
+
+    patterns += 1;
+    let matched = 0;
+    // Explicit samples remain checks even if filters or crawl limits left them unfetched.
+    const candidates = new Set([...byUrl.keys(), ...(contract.samples ?? [])]);
+    for (const source of [...candidates].sort((left, right) => left.localeCompare(right))) {
+      const captures = matchRedirectSource(contract.from, source);
+      if (captures === undefined) continue;
+      matched += 1;
+      patternSources.add(source);
+      sources.add(source);
+      const derived: RedirectContract = {
+        ...contract,
+        from: source,
+        to: interpolateRedirectTarget(contract.to, captures),
+        declaredPattern: contract.from,
+      };
+      const result = auditContract(derived, byUrl);
+      checks.push({ ...result.check, declaredPattern: contract.from });
+      findings.push(...result.findings);
+    }
+    if (matched === 0) unmatchedPatterns.push(contract.from);
+  }
+
+  for (const pattern of unmatchedPatterns) {
+    findings.push({
+      code: "redirect-pattern-unmatched",
+      severity: "info",
+      url: pattern,
+      message: `No crawled URL matched the redirect pattern ${pattern}.`,
+      evidence: { pattern },
+    });
+  }
+
   return {
-    findings: audited.flatMap((result) => result.findings),
+    findings,
+    sources: [...sources].sort((left, right) => left.localeCompare(right)),
     report: {
       declared: checks.length,
       verified: checks.filter((check) => check.outcome === "verified").length,
       failed: checks.filter((check) => check.outcome === "failed").length,
       unchecked: checks.filter((check) => check.outcome === "unchecked").length,
       skippedBuildRedirects,
+      ...(patterns === 0
+        ? {}
+        : { patterns, patternMatches: patternSources.size, unmatchedPatterns }),
       checks,
     },
   };

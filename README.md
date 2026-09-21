@@ -124,7 +124,7 @@ redirects:
 
 This expects `/old-pricing` to return a `301` and reach `/pricing` in one hop. RouteLint adds both URLs to the crawl and reports a missing redirect, wrong status, wrong destination, or unhealthy target as an error. Extra hops produce a warning. Redirects that match are counted as verified.
 
-Contracts cover exact, same-origin URLs. `routelint next` also checks concrete, unconditional redirects from supported build manifests. See the [redirect guide](docs/REDIRECTS.md) for the supported cases and finding codes.
+Contracts support exact sources, query strings, path patterns such as `/old/*`, and destinations on other origins. Pattern `samples` add concrete sources to check. `routelint next` also checks concrete, unconditional redirects from supported build manifests. See the [redirect guide](docs/REDIRECTS.md) for the supported cases and finding codes.
 
 ### Compare SSR with the rendered DOM
 
@@ -216,6 +216,8 @@ limits:
   timeoutMs: 15000
   maxBytes: 2000000
   maxRedirects: 5
+  delayMs: 0
+  honorCrawlDelay: true
 
 audit:
   requireTitle: true
@@ -224,6 +226,9 @@ audit:
   requireH1: true
   requireSitemapCoverage: true
   maxDepth: 4
+  # Optional response-time budgets, in milliseconds:
+  # maxResponseMs: 1000
+  # maxRedirectHopMs: 500
   severities:
     noindex: info
   paths:
@@ -241,6 +246,10 @@ rendered:
 ```
 
 Command-line options override the config file. JSON config works too.
+
+Raw page requests, including redirect hops and agent comparisons, honor the matching robots.txt `Crawl-delay` or `Request-rate`, capped at 10 seconds. Set `limits.delayMs` or `--delay 250ms` for explicit minimum spacing; explicit delays are not capped. `--ignore-crawl-delay` ignores robots pacing while keeping access rules. Discovery requests for robots.txt and sitemaps, and optional browser rendering, use their own request policies.
+
+Response-time budgets inspect the primary agent's complete capture and its redirect hops. Captures include network and body-processing time, excluding deliberate pacing waits. Path scopes can override both budgets; each redirect hop uses its own URL's scope.
 
 ### Preview credentials
 
@@ -262,7 +271,7 @@ Reports can still contain private URLs. Keep them and real credentials out of Gi
 
 ## Reports and CI
 
-Choose `terminal` for a quick read, `html` for a shareable report, `json` for saved baselines or tooling, and `sarif` for code-scanning integrations.
+Choose `terminal` for a quick read, `html` for a shareable report, `json` for saved baselines or tooling, and `sarif` for code-scanning integrations. `markdown` produces a GitHub summary, `csv` exports findings for spreadsheets, and `junit` produces CI test results. JUnit maps errors and warnings to failures, independently of the CLI's `--fail-on` exit threshold; informational findings pass.
 
 ```bash
 npx routelint check https://example.com \
@@ -293,7 +302,7 @@ RouteLint checks delivery and technical SEO. It does not:
 - calculate Core Web Vitals;
 - submit URLs to search engines;
 - crawl external links by default;
-- emulate dynamic, conditional, query-bearing, or off-origin redirect rules;
+- emulate framework-specific dynamic or conditional redirect rules;
 - claim that an unobserved dynamic route exists;
 - replace a full authenticated browser test or a search-engine index report.
 

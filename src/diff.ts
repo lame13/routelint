@@ -156,12 +156,18 @@ const redirectExpectationSchema = z.object({
   to: httpUrlSchema,
   status: redirectStatusSchema,
   maxHops: z.number().int().positive(),
+  kind: z.enum(["exact", "pattern"]).optional(),
+  samples: z.array(httpUrlSchema).optional(),
 });
 const redirectContractSchema = redirectExpectationSchema.extend({
   source: z.enum(["config", "next-build"]),
+  declaredPattern: httpUrlSchema.optional(),
 });
 const redirectContractReportSchema = z.object({
   declared: nonNegativeIntegerSchema,
+  patterns: nonNegativeIntegerSchema.optional(),
+  patternMatches: nonNegativeIntegerSchema.optional(),
+  unmatchedPatterns: z.array(httpUrlSchema).optional(),
   verified: nonNegativeIntegerSchema,
   failed: nonNegativeIntegerSchema,
   unchecked: nonNegativeIntegerSchema,
@@ -186,6 +192,7 @@ const redirectContractReportSchema = z.object({
       }),
       outcome: z.enum(["verified", "failed", "unchecked"]),
       findingCodes: z.array(z.string().min(1)),
+      declaredPattern: httpUrlSchema.optional(),
     }),
   ),
 });
@@ -257,10 +264,12 @@ const robotsFileSchema = z.object({
     z.object({
       agents: z.array(z.string()),
       rules: z.array(z.object({ directive: z.enum(["allow", "disallow"]), pattern: z.string() })),
+      crawlDelaySeconds: nonNegativeNumberSchema.optional(),
     }),
   ),
   sitemaps: z.array(httpUrlSchema),
   warnings: z.array(z.string()),
+  crawlDelaySeconds: nonNegativeNumberSchema.optional(),
 });
 const summarySchema = z.object({
   routes: nonNegativeIntegerSchema,
@@ -282,6 +291,8 @@ const reportAuditSchema = z.object({
   requireH1: z.boolean(),
   requireSitemapCoverage: z.boolean(),
   maxDepth: nonNegativeIntegerSchema,
+  maxResponseMs: z.number().int().positive().optional(),
+  maxRedirectHopMs: z.number().int().positive().optional(),
   severities: z.record(z.string(), ruleSeveritySchema).optional(),
   paths: z
     .array(
@@ -294,13 +305,15 @@ const reportAuditSchema = z.object({
         requireH1: z.boolean().optional(),
         requireSitemapCoverage: z.boolean().optional(),
         maxDepth: nonNegativeIntegerSchema.optional(),
+        maxResponseMs: z.number().int().positive().optional(),
+        maxRedirectHopMs: z.number().int().positive().optional(),
         severities: z.record(z.string(), ruleSeveritySchema).optional(),
       }),
     )
     .optional(),
 });
 const routeLintReportSchema = z.object({
-  schemaVersion: z.enum(["1", "2", "3"]),
+  schemaVersion: z.enum(["1", "2", "3", "4"]),
   toolVersion: z.string().min(1),
   generatedAt: z.iso.datetime(),
   durationMs: nonNegativeNumberSchema,
@@ -319,6 +332,8 @@ const routeLintReportSchema = z.object({
     timeoutMs: z.number().int().positive().optional(),
     maxBytes: z.number().int().positive().optional(),
     maxRedirects: nonNegativeIntegerSchema.optional(),
+    delayMs: nonNegativeIntegerSchema.optional(),
+    honorCrawlDelay: z.boolean().optional(),
     rendered: z.boolean().optional(),
     renderedConcurrency: z.number().int().positive().optional(),
     renderedTimeoutMs: z.number().int().positive().optional(),

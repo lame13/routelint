@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { fetchRobots, isRobotsAllowed, parseRobotsText } from "../src/discovery/robots.js";
+import {
+  fetchRobots,
+  isRobotsAllowed,
+  parseRobotsText,
+  robotsCrawlDelaySeconds,
+} from "../src/discovery/robots.js";
 
 describe("robots.txt discovery", () => {
   it("parses groups and sitemap directives", () => {
@@ -194,5 +199,95 @@ Disallow: /second-only
       warnings: [],
     });
     expect(isRobotsAllowed(robots, "/public", "AnyBot")).toBe(true);
+  });
+});
+
+describe("robots crawl delay", () => {
+  const robotsUrl = "https://example.com/robots.txt";
+
+  it("ignores a request rate whose normalized delay overflows", () => {
+    const requests = `0.${"0".repeat(310)}1`;
+    const robots = parseRobotsText(`User-agent: *\nRequest-rate: ${requests}/60\n`, robotsUrl);
+    expect(robots.crawlDelaySeconds).toBeUndefined();
+    expect(robots.warnings).toHaveLength(1);
+    expect(robotsCrawlDelaySeconds(robots, "AnyBot")).toBeUndefined();
+  });
+
+  it("records Crawl-delay per group and keeps the strictest value on the file", () => {
+    const robots = parseRobotsText(
+      `User-agent: slowbot
+Crawl-delay: 2
+Disallow:
+
+User-agent: *
+Crawl-delay: 0.5
+Disallow: /private
+`,
+      robotsUrl,
+    );
+
+    expect(robots.groups).toEqual([
+      expect.objectContaining({ agents: ["slowbot"], crawlDelaySeconds: 2 }),
+      expect.objectContaining({ agents: ["*"], crawlDelaySeconds: 0.5 }),
+    ]);
+    expect(robots.crawlDelaySeconds).toBe(2);
+    expect(robotsCrawlDelaySeconds(robots, "SlowBot/1.0")).toBe(2);
+    expect(robotsCrawlDelaySeconds(robots, "OtherBot/1.0")).toBe(0.5);
+  });
+
+  it("converts Request-rate into seconds per request and ignores unusable values", () => {
+    const robots = parseRobotsText(
+      `User-agent: *
+Request-rate: 1/10
+Disallow:
+`,
+      robotsUrl,
+    );
+
+    expect(robotsCrawlDelaySeconds(robots, "AnyBot")).toBe(10);
+    expect(robots.crawlDelaySeconds).toBe(10);
+
+    const hourly = parseRobotsText(
+      `User-agent: *
+Request-rate: 6/m
+Disallow:
+`,
+      robotsUrl,
+    );
+    expect(robotsCrawlDelaySeconds(hourly, "AnyBot")).toBe(10);
+  });
+
+  it("warns about unusable values instead of guessing", () => {
+    const robots = parseRobotsText(
+      `User-agent: *
+Crawl-delay: soon
+Request-rate: often
+Disallow:
+`,
+      robotsUrl,
+    );
+
+    expect(robots.groups[0]?.crawlDelaySeconds).toBeUndefined();
+    expect(robots.crawlDelaySeconds).toBeUndefined();
+    expect(robots.warnings).toEqual([
+      "Ignored a Crawl-delay value that is not a positive number of seconds.",
+      "Ignored a Request-rate value that is not written as requests per second or minute.",
+    ]);
+    expect(robotsCrawlDelaySeconds(robots, "AnyBot")).toBeUndefined();
+  });
+
+  it("does not apply a crawl delay when robots.txt is missing or unavailable", () => {
+    const robots = parseRobotsText("User-agent: *\nCrawl-delay: 5\nDisallow:\n", robotsUrl);
+
+    expect(
+      robotsCrawlDelaySeconds({ ...robots, availability: { state: "missing" } }, "AnyBot"),
+    ).toBeUndefined();
+    expect(
+      robotsCrawlDelaySeconds(
+        { ...robots, availability: { state: "unavailable", reason: "timeout" } },
+        "AnyBot",
+      ),
+    ).toBeUndefined();
+    expect(robotsCrawlDelaySeconds(undefined, "AnyBot")).toBeUndefined();
   });
 });

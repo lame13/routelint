@@ -25,6 +25,7 @@ describe("report redaction", () => {
             to: `https://example.com/public?token=${secret}`,
             status: 301,
             maxHops: 1,
+            samples: [`https://example.com/private/sample?token=sample-secret`],
           },
         ],
       },
@@ -47,7 +48,8 @@ describe("report redaction", () => {
         url: `https://example.com/robots.txt?token=${secret}`,
         status: 503,
         availability: { state: "unavailable", reason: "http-error" },
-        groups: [],
+        groups: [{ agents: ["*"], rules: [], crawlDelaySeconds: 2 }],
+        crawlDelaySeconds: 2,
         sitemaps: [],
         warnings: [`robots.txt failed near ${secret}`],
       },
@@ -57,14 +59,18 @@ describe("report redaction", () => {
         failed: 1,
         unchecked: 0,
         skippedBuildRedirects: 0,
+        unmatchedPatterns: ["https://example.com/unused/*?token=unmatched-secret"],
         checks: [
           {
+            declaredPattern: "https://example.com/private/*?token=pattern-secret",
             contract: {
               from: `https://example.com/private?token=${secret}`,
               to: `https://example.com/public?token=${secret}`,
               status: 301,
               maxHops: 1,
               source: "config",
+              declaredPattern: "https://example.com/private/*?token=contract-pattern-secret",
+              samples: ["https://example.com/private/sample?token=contract-sample-secret"],
             },
             observed: {
               completion: "complete",
@@ -153,6 +159,17 @@ describe("report redaction", () => {
     const serialized = JSON.stringify(safe);
 
     expect(serialized).not.toContain(secret);
+    for (const value of [
+      "sample-secret",
+      "unmatched-secret",
+      "pattern-secret",
+      "contract-pattern-secret",
+      "contract-sample-secret",
+    ]) {
+      expect(serialized).not.toContain(value);
+    }
+    expect(safe.robots?.groups[0]?.crawlDelaySeconds).toBe(2);
+    expect(safe.robots?.crawlDelaySeconds).toBe(2);
     expect(serialized).not.toContain("/Users/niko/private-site");
     expect(safe.build).toMatchObject({ root: ".", buildDirectory: ".next" });
     expect(safe.robots?.availability).toEqual({ state: "unavailable", reason: "http-error" });

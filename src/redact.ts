@@ -118,6 +118,9 @@ function redirectExpectation(
     ...value,
     from: reference(value.from, secrets),
     to: reference(value.to, secrets),
+    ...(value.samples === undefined
+      ? {}
+      : { samples: value.samples.map((sample) => reference(sample, secrets)) }),
   };
 }
 
@@ -127,9 +130,15 @@ function redirectContractCheck(
 ): RedirectContractCheck {
   return {
     ...value,
+    ...(value.declaredPattern === undefined
+      ? {}
+      : { declaredPattern: reference(value.declaredPattern, secrets) }),
     contract: {
       ...redirectExpectation(value.contract, secrets),
       source: value.contract.source,
+      ...(value.contract.declaredPattern === undefined
+        ? {}
+        : { declaredPattern: reference(value.contract.declaredPattern, secrets) }),
     },
     observed: {
       ...value.observed,
@@ -152,6 +161,11 @@ function redirectContractReport(
 ): RedirectContractReport {
   return {
     ...value,
+    ...(value.unmatchedPatterns === undefined
+      ? {}
+      : {
+          unmatchedPatterns: value.unmatchedPatterns.map((pattern) => reference(pattern, secrets)),
+        }),
     checks: value.checks.map((check) => redirectContractCheck(check, secrets)),
   };
 }
@@ -195,6 +209,7 @@ function robots(value: RobotsFile, secrets: readonly string[]): RobotsFile {
     ...value,
     url: text(value.url, secrets),
     groups: value.groups.map((group) => ({
+      ...group,
       agents: group.agents.map((agent) => text(agent, secrets)),
       rules: group.rules.map((rule) => ({
         ...rule,

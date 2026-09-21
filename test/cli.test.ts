@@ -90,6 +90,13 @@ function emptyReport(generatedAt: string): Record<string, unknown> {
 }
 
 describe("packaged-style CLI execution", () => {
+  it("accepts a zero crawl delay before checking the required base URL", async () => {
+    const result = await runCli(["check", "--delay", "0"], await temporaryDirectory());
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("base URL is required");
+    expect(result.stderr).not.toContain("Timeout must be greater than zero");
+  });
+
   it("prints top-level and command help without importing a network target", async () => {
     const directory = await temporaryDirectory();
     const topLevel = await runCli(["--help"], directory);
@@ -108,6 +115,22 @@ describe("packaged-style CLI execution", () => {
     expect(check.stdout).toContain("--urls <file>");
     expect(check.stdout).toContain("--rendered");
     expect(check.stdout).toContain("--changed-only <baseline.json>");
+    expect(check.stdout).toContain("--delay <duration>");
+    expect(check.stdout).toContain("--ignore-crawl-delay");
+    for (const format of ["terminal", "json", "sarif", "html", "markdown", "csv", "junit"]) {
+      expect(check.stdout).toContain(format);
+    }
+  });
+
+  it("rejects an unsupported report format before making a request", async () => {
+    const result = await runCli(
+      ["check", "https://example.test", "--format", "xlsx"],
+      await temporaryDirectory(),
+    );
+
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("junit");
   });
 
   it("prints the package version", async () => {

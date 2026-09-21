@@ -13,6 +13,17 @@ redirects:
     to: /pricing
     status: 301
     maxHops: 1
+  # A pattern contract is verified against the matching URLs the crawl observes.
+  - from: /blog/old/*
+    to: /blog/new/*
+    status: 308
+    maxHops: 2
+    samples:
+      - /blog/old/hello-world
+  # Destinations may leave the audited origin.
+  - from: /moved-away
+    to: https://archive.example.com/moved-away
+    status: 308
 
 exclude:
   - /account/**
@@ -25,6 +36,8 @@ limits:
   timeoutMs: 15000
   maxBytes: 2000000
   maxRedirects: 5
+  delayMs: 0
+  honorCrawlDelay: true
 
 audit:
   requireTitle: true
@@ -33,6 +46,8 @@ audit:
   requireH1: true
   requireSitemapCoverage: true
   maxDepth: 4
+  maxResponseMs: 1000
+  maxRedirectHopMs: 500
   severities: {}
   paths: []
 

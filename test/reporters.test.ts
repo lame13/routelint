@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  renderCsvReport,
   renderHtmlReport,
   renderJsonReport,
+  renderJunitReport,
+  renderMarkdownReport,
   renderReport,
   renderSarifReport,
   renderTerminalReport,
@@ -346,6 +349,25 @@ describe("HTML reporter", () => {
 });
 
 describe("report dispatcher", () => {
+  it("shows unmatched patterns even when there were no concrete redirect checks", () => {
+    const report = {
+      ...fixture(),
+      redirectContracts: {
+        declared: 0,
+        verified: 0,
+        failed: 0,
+        unchecked: 0,
+        skippedBuildRedirects: 0,
+        patterns: 1,
+        patternMatches: 0,
+        unmatchedPatterns: ["https://example.com/old/*"],
+        checks: [],
+      },
+    };
+    expect(renderTerminalReport(report)).toContain("1 pattern unmatched");
+    expect(renderHtmlReport(report)).toContain("1 pattern matched nothing");
+  });
+
   it("selects every supported output format", () => {
     const report = fixture();
 
@@ -353,5 +375,167 @@ describe("report dispatcher", () => {
     expect(renderReport(report, "json")).toBe(renderJsonReport(report));
     expect(renderReport(report, "sarif")).toBe(renderSarifReport(report));
     expect(renderReport(report, "html")).toBe(renderHtmlReport(report));
+    expect(renderReport(report, "markdown")).toBe(renderMarkdownReport(report));
+    expect(renderReport(report, "csv")).toBe(renderCsvReport(report));
+    expect(renderReport(report, "junit")).toBe(renderJunitReport(report));
+  });
+});
+
+describe("Markdown reporter", () => {
+  it("escapes Markdown links, images, backslashes, and code delimiters", () => {
+    const markdown = renderMarkdownReport({
+      ...fixture(),
+      findings: [
+        {
+          code: "bad`code",
+          severity: "error",
+          message: "![image](https://outside.test/pixel) [link](https://outside.test/) \\| *bold*",
+        },
+      ],
+    });
+    expect(markdown).toContain("bad\\`code");
+    expect(markdown).toContain("\\!\\[image\\]\\(https://outside.test/pixel\\)");
+    expect(markdown).not.toContain("![image](");
+    expect(markdown).not.toContain("[link](");
+    expect(markdown).toContain("\\\\\\| \\*bold\\*");
+  });
+
+  it("identifies a changed-only report instead of implying that all findings are shown", () => {
+    const markdown = renderMarkdownReport({
+      ...fixture(),
+      comparison: {
+        mode: "changed-only",
+        baselineGeneratedAt: "2026-09-20T00:00:00.000Z",
+        newFindings: 1,
+        worsenedFindings: 1,
+        resolvedFindings: 2,
+        unchangedFindings: 8,
+      },
+    });
+    expect(markdown).toContain("Changed-only report");
+    expect(markdown).toContain("1 new, 1 worsened, 2 resolved, and 8 unchanged findings");
+  });
+
+  it("renders a GitHub-flavored summary that neutralizes report values", () => {
+    const markdown = renderMarkdownReport(fixture());
+
+    expect(markdown.startsWith("# RouteLint report\n")).toBe(true);
+    expect(markdown).toContain("| Findings | 2 (1 errors, 1 warnings, 0 info) |");
+    expect(markdown).toContain("| error | LINK\\_BROKEN | https://example.com/broken |");
+    expect(markdown).toContain("&lt;/script&gt;");
+    expect(markdown).not.toContain("<img src=x");
+    expect(markdown).not.toContain("\u001b");
+    expect(markdown).toContain("Redirect contracts");
+    expect(markdown.endsWith("\n")).toBe(true);
+  });
+
+  it("summarizes rather than listing an unbounded number of findings", () => {
+    const report = fixture();
+    const findings = Array.from({ length: 250 }, (_value, index) => ({
+      code: `CODE_${index}`,
+      severity: "warning" as const,
+      message: `Finding ${index}`,
+      url: `https://example.com/page-${index}`,
+    }));
+
+    const markdown = renderMarkdownReport({ ...report, findings });
+
+    expect(markdown).toContain("50 further findings are available in the JSON report.");
+  });
+});
+
+describe("CSV reporter", () => {
+  it.each(["=1+1", "+1+1", "-1+1", "@SUM(A1)", "\t=1+1", "\r\n=1+1"])(
+    "neutralizes spreadsheet formulas in untrusted fields: %j",
+    (value) => {
+      const csv = renderCsvReport({
+        ...fixture(),
+        findings: [
+          {
+            code: value,
+            severity: "error",
+            message: value,
+            evidence: { [value]: "value" },
+          },
+        ],
+      });
+      expect(csv).not.toMatch(/(?:^|,)"?\s*[=+@-]/u);
+      expect(csv).toContain("'");
+    },
+  );
+
+  it("writes one RFC 4180 row per finding with a header", () => {
+    const csv = renderCsvReport(fixture());
+    const lines = csv.split("\n");
+
+    expect(lines[0]).toBe("severity,code,url,message,related_urls,evidence");
+    expect(lines).toHaveLength(4);
+    expect(csv).toContain('"bad""><script=true; status=404"');
+    expect(csv).not.toContain("\u001b");
+    expect(csv.endsWith("\n")).toBe(true);
+  });
+
+  it("quotes fields that contain the delimiter", () => {
+    const report = fixture();
+    const csv = renderCsvReport({
+      ...report,
+      findings: [
+        {
+          code: "duplicate-title",
+          severity: "warning",
+          message: 'Title repeated, twice "here"',
+          url: "https://example.com/a",
+        },
+      ],
+    });
+
+    expect(csv).toContain('"Title repeated, twice ""here"""');
+  });
+});
+
+describe("JUnit reporter", () => {
+  it("removes forbidden XML codepoints while retaining valid Unicode", () => {
+    const junit = renderJunitReport({
+      ...fixture(),
+      findings: [
+        {
+          code: "invalid-xml",
+          severity: "error",
+          message: "bad\u0000\ud800\ufffe\uffff valid 😀",
+        },
+      ],
+    });
+    for (const forbidden of ["\u0000", "\ud800", "\ufffe", "\uffff"]) {
+      expect(junit).not.toContain(forbidden);
+    }
+    expect(junit).toContain("valid 😀");
+  });
+
+  it("maps findings to test cases and severities to failures", () => {
+    const report = fixture();
+    const junit = renderJunitReport({
+      ...report,
+      findings: [
+        ...report.findings,
+        { code: "page-budget-reached", severity: "info", message: "The crawl stopped." },
+      ],
+    });
+
+    expect(junit.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
+    expect(junit).toContain('<testsuites name="routelint" tests="3" failures="2">');
+    expect(junit).toContain('<failure type="error"');
+    expect(junit).toContain('<failure type="warning"');
+    expect(junit).toContain("<system-out>");
+    expect(junit).toContain("&lt;/script&gt;");
+    expect(junit).toContain('<property name="routes" value="2"/>');
+    expect(junit).not.toContain("\u001b");
+  });
+
+  it("emits one passing test case when there are no findings", () => {
+    const report = fixture();
+    const junit = renderJunitReport({ ...report, findings: [] });
+
+    expect(junit).toContain('tests="1" failures="0"');
+    expect(junit).toContain('<testcase classname="routelint" name="no findings"/>');
   });
 });

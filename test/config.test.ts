@@ -24,6 +24,40 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 describe("loadConfig", () => {
+  it("merges samples from duplicate pattern declarations", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, "routelint.config.json"),
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        redirects: [
+          { from: "/old/*", to: "/new/*", status: 301, samples: ["/old/a"] },
+          { from: "/old/*", to: "/new/*", status: 301, samples: ["/old/b", "/old/a"] },
+        ],
+      }),
+    );
+    const config = await loadConfig({ cwd: directory });
+    expect(config.redirects?.[0]?.samples).toEqual([
+      "https://example.test/old/a",
+      "https://example.test/old/b",
+    ]);
+  });
+
+  it.each([
+    [{ from: "/old/*", to: "/new/*", samples: ["/old/*"] }, "concrete URL"],
+    [{ from: "/old/*", to: "/old/*" }, "itself"],
+  ])("rejects unusable pattern declarations %j", async (redirect, message) => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, "routelint.config.json"),
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        redirects: [{ ...redirect, status: 301 }],
+      }),
+    );
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow(message);
+  });
+
   it("builds safe, documented defaults from only a base URL", async () => {
     const config = await loadConfig({
       cwd: await temporaryDirectory(),
@@ -258,6 +292,85 @@ headers:
     );
   });
 
+  it("resolves pattern, query-bearing, and cross-origin contracts with their samples", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, "routelint.config.yml"),
+      `baseUrl: https://example.test
+redirects:
+  - from: /blog/old/*
+    to: /blog/new/*
+    status: 308
+    maxHops: 2
+    samples: [/blog/old/hello, https://example.test/blog/old/world]
+  - from: /legacy?ref=old
+    to: /legacy
+    status: 301
+  - from: /moved-away
+    to: https://archive.example.test/moved-away
+    status: 308
+limits:
+  delayMs: 250
+  honorCrawlDelay: false
+audit:
+  maxResponseMs: 1200
+  maxRedirectHopMs: 400
+  paths:
+    - include: [/docs/**]
+      maxResponseMs: 3000
+`,
+      "utf8",
+    );
+
+    const config = await loadConfig({ cwd: directory });
+
+    expect(config.redirects).toEqual([
+      {
+        from: "https://example.test/blog/old/*",
+        to: "https://example.test/blog/new/*",
+        status: 308,
+        maxHops: 2,
+        kind: "pattern",
+        samples: ["https://example.test/blog/old/hello", "https://example.test/blog/old/world"],
+      },
+      {
+        from: "https://example.test/legacy?ref=old",
+        to: "https://example.test/legacy",
+        status: 301,
+        maxHops: 1,
+      },
+      {
+        from: "https://example.test/moved-away",
+        to: "https://archive.example.test/moved-away",
+        status: 308,
+        maxHops: 1,
+      },
+    ]);
+    expect(config.limits).toMatchObject({ delayMs: 250, honorCrawlDelay: false });
+    expect(config.audit).toMatchObject({ maxResponseMs: 1_200, maxRedirectHopMs: 400 });
+    expect(config.audit.paths?.[0]).toMatchObject({ maxResponseMs: 3_000 });
+  });
+
+  it("applies crawl pacing overrides from the command line last", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, "routelint.config.yml"),
+      `baseUrl: https://example.test
+limits:
+  delayMs: 250
+  honorCrawlDelay: true
+`,
+      "utf8",
+    );
+
+    const config = await loadConfig({
+      cwd: directory,
+      overrides: { delayMs: 0, honorCrawlDelay: false },
+    });
+
+    expect(config.limits).toMatchObject({ delayMs: 0, honorCrawlDelay: false });
+  });
+
   it("rejects redirect contracts that are ambiguous, off-origin, or impossible to capture", async () => {
     const directory = await temporaryDirectory();
     const configPath = join(directory, "routelint.config.yml");
@@ -266,25 +379,73 @@ headers:
       configPath,
       `baseUrl: https://example.test
 redirects:
-  - from: /old?campaign=one
+  - from: https://outside.test/old
     to: /new
     status: 301
 `,
       "utf8",
     );
-    await expect(loadConfig({ cwd: directory })).rejects.toThrow("cannot include query strings");
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow(
+      "must keep its source on the configured origin",
+    );
+
+    await writeFile(
+      configPath,
+      `baseUrl: https://example.test
+redirects:
+  - from: /old-*.html
+    to: /new
+    status: 301
+`,
+      "utf8",
+    );
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow(
+      "wildcards must occupy a whole path segment",
+    );
+
+    await writeFile(
+      configPath,
+      `baseUrl: https://example.test
+redirects:
+  - from: /blog/old/**
+    to: /blog/*/new/*/extra
+    status: 301
+`,
+      "utf8",
+    );
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow(
+      "uses 2 wildcards but the source declares 1",
+    );
+
+    await writeFile(
+      configPath,
+      `baseUrl: https://example.test
+redirects:
+  - from: /blog/old/*
+    to: /blog/new/*
+    status: 301
+    samples: [/blog/other/hello]
+`,
+      "utf8",
+    );
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow(
+      "does not match the declared pattern",
+    );
 
     await writeFile(
       configPath,
       `baseUrl: https://example.test
 redirects:
   - from: /old
-    to: https://outside.test/new
+    to: /new
     status: 301
+    samples: [/old]
 `,
       "utf8",
     );
-    await expect(loadConfig({ cwd: directory })).rejects.toThrow("configured origin");
+    await expect(loadConfig({ cwd: directory })).rejects.toThrow(
+      "only supported when from declares a wildcard pattern",
+    );
 
     await writeFile(
       configPath,

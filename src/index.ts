@@ -10,6 +10,7 @@ export {
 export { changedOnlyReport } from "./changed.js";
 export { loadConfig, parseHeaderOptions } from "./config.js";
 export { contentEvidenceFromText, extractContentEvidence, simhashDistance } from "./content.js";
+export type { CrawlPacing } from "./crawl.js";
 export { crawl, crawlSite, isAllowedByRobots } from "./crawl.js";
 export {
   diffReports,
@@ -34,6 +35,7 @@ export {
   isRobotsAllowed,
   parseRobotsText,
   resolveRobotsAvailability,
+  robotsCrawlDelaySeconds,
 } from "./discovery/robots.js";
 export type { FetchSitemapsOptions, ParsedSitemap } from "./discovery/sitemap.js";
 export { fetchSitemaps, parseSitemapXml } from "./discovery/sitemap.js";
@@ -53,10 +55,16 @@ export { redactReport } from "./redact.js";
 export type {
   RedirectContractAudit,
   RedirectContractCollection,
+  RedirectSourcePlan,
 } from "./redirects.js";
 export {
   auditRedirectContracts,
   collectRedirectContracts,
+  interpolateRedirectTarget,
+  isRedirectPattern,
+  matchRedirectSource,
+  planRedirectSource,
+  planRedirectTarget,
   redirectContractCandidates,
 } from "./redirects.js";
 export type {
@@ -69,8 +77,11 @@ export {
   RenderedCaptureUnavailableError,
 } from "./rendered.js";
 export {
+  renderCsvReport,
   renderHtmlReport,
   renderJsonReport,
+  renderJunitReport,
+  renderMarkdownReport,
   renderReport,
   renderSarifReport,
   renderTerminalReport,

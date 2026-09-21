@@ -1,4 +1,5 @@
 import { simhashDistance } from "./content.js";
+import type { CrawlPacing } from "./crawl.js";
 import { auditRedirectContracts } from "./redirects.js";
 import type {
   AuditOptions,
@@ -25,6 +26,7 @@ export interface AuditInput {
   readonly skippedBuildRedirects?: number;
   readonly options: AuditOptions;
   readonly truncated: boolean;
+  readonly pacing?: CrawlPacing;
 }
 
 export interface AuditOutput {
@@ -152,6 +154,8 @@ function optionsForRoute(options: AuditOptions, url: string): AuditOptions {
         ? {}
         : { requireSitemapCoverage: scope.requireSitemapCoverage }),
       ...(scope.maxDepth === undefined ? {} : { maxDepth: scope.maxDepth }),
+      ...(scope.maxResponseMs === undefined ? {} : { maxResponseMs: scope.maxResponseMs }),
+      ...(scope.maxRedirectHopMs === undefined ? {} : { maxRedirectHopMs: scope.maxRedirectHopMs }),
     };
   }
   return effective;
@@ -1051,6 +1055,55 @@ function isSuccessfulHtml(snapshot: PageSnapshot | undefined): snapshot is PageS
   );
 }
 
+/**
+ * Report routes and redirect hops that exceeded a configured response-time budget.
+ * Both budgets are opt-in: without a configured value the collected durations stay evidence only.
+ */
+function checkResponseTimes(
+  routes: readonly RouteNode[],
+  options: AuditOptions,
+  findings: Finding[],
+): void {
+  for (const route of routes) {
+    const effective = optionsForRoute(options, route.url);
+    const snapshot = primarySnapshot(route);
+    const routeBudgetMs = effective.maxResponseMs;
+    if (snapshot === undefined) continue;
+
+    for (const hop of snapshot.redirects) {
+      const hopBudgetMs = optionsForRoute(options, hop.url).maxRedirectHopMs;
+      if (hopBudgetMs === undefined || hop.durationMs <= hopBudgetMs) continue;
+      pushFinding(findings, {
+        code: "slow-redirect",
+        severity: "warning",
+        url: hop.url,
+        relatedUrls: [hop.location],
+        message: `The HTTP ${hop.status} redirect hop took ${Math.round(hop.durationMs)} ms; the configured budget is ${hopBudgetMs} ms.`,
+        evidence: {
+          durationMs: Math.round(hop.durationMs),
+          budgetMs: hopBudgetMs,
+          status: hop.status,
+        },
+      });
+    }
+
+    if (routeBudgetMs === undefined || snapshot.completion !== "complete") continue;
+    if (snapshot.durationMs <= routeBudgetMs) continue;
+    pushFinding(findings, {
+      code: "slow-route",
+      severity: "warning",
+      url: route.url,
+      message: `The route took ${Math.round(snapshot.durationMs)} ms to capture; the configured budget is ${routeBudgetMs} ms.`,
+      evidence: {
+        durationMs: Math.round(snapshot.durationMs),
+        budgetMs: routeBudgetMs,
+        ...(snapshot.status === undefined ? {} : { status: snapshot.status }),
+        redirects: snapshot.redirects.length,
+      },
+    });
+  }
+}
+
 function checkSoft404s(routes: readonly RouteNode[], findings: Finding[]): void {
   const references = routes
     .map((route) => ({ route, snapshot: primarySnapshot(route) }))
@@ -1118,6 +1171,28 @@ function checkSoft404s(routes: readonly RouteNode[], findings: Finding[]): void 
 }
 
 function addInventoryFindings(input: AuditInput, findings: Finding[]): void {
+  const pacing = input.pacing;
+  if (pacing?.clamped === true) {
+    pushFinding(findings, {
+      code: "crawl-policy",
+      severity: "warning",
+      message: `robots.txt declares a crawl delay of ${pacing.robotsDelaySeconds ?? 0}s; request spacing was capped at ${pacing.delayMs} ms.`,
+      evidence: {
+        robotsDelaySeconds: pacing.robotsDelaySeconds ?? 0,
+        delayMs: pacing.delayMs,
+      },
+    });
+  } else if (pacing?.robotsDelaySeconds !== undefined) {
+    pushFinding(findings, {
+      code: "crawl-policy",
+      severity: "info",
+      message: `Requests were spaced ${pacing.delayMs} ms apart to honor the crawl delay declared for the audited user agents.`,
+      evidence: {
+        robotsDelaySeconds: pacing.robotsDelaySeconds,
+        delayMs: pacing.delayMs,
+      },
+    });
+  }
   for (const warning of input.sitemap.warnings) {
     pushFinding(findings, {
       code: "sitemap-warning",
@@ -1192,13 +1267,15 @@ export function auditSite(input: AuditInput): AuditOutput {
     input.redirectContracts ?? [],
     input.skippedBuildRedirects ?? 0,
   );
-  const redirectSources = new Set((input.redirectContracts ?? []).map((contract) => contract.from));
+  // Pattern contracts exempt each concrete source URL they matched.
+  const redirectSources = new Set(redirectAudit.sources);
   addInventoryFindings(input, findings);
   findings.push(...redirectAudit.findings);
   for (const route of input.routes) {
     checkPage(findings, route, input.options, redirectSources.has(route.url));
     checkAgentDifferences(findings, route);
   }
+  checkResponseTimes(input.routes, input.options, findings);
   checkGraph(input, findings);
   checkDuplicates(input.routes, findings);
   checkSoft404s(input.routes, findings);

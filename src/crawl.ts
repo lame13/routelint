@@ -1,4 +1,9 @@
-import { isRobotsAllowed, resolveRobotsAvailability } from "./discovery/robots.js";
+import { performance } from "node:perf_hooks";
+import {
+  isRobotsAllowed,
+  resolveRobotsAvailability,
+  robotsCrawlDelaySeconds,
+} from "./discovery/robots.js";
 import { emptyPageSignals } from "./html-parser.js";
 import { capturePage } from "./http.js";
 import type {
@@ -14,10 +19,21 @@ import type {
 } from "./types.js";
 import { isSameOrigin, isUrlIncluded, normalizeUrl } from "./url.js";
 
+/** Effective request spacing for one crawl, after robots.txt and configuration are combined. */
+export interface CrawlPacing {
+  readonly delayMs: number;
+  readonly robotsDelaySeconds?: number;
+  readonly clamped: boolean;
+}
+
 export interface CrawlResult {
   readonly routes: readonly RouteNode[];
   readonly truncated: boolean;
+  readonly pacing: CrawlPacing;
 }
+
+/** Cap delays declared by robots.txt; explicit user delays remain a minimum. */
+const MAX_HONORED_DELAY_MS = 10_000;
 
 interface MutableRoute {
   readonly url: string;
@@ -74,6 +90,61 @@ class RequestLimiter {
   }
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Space request starts by a fixed interval. Slots are handed out in call order, so a batch
+ * of concurrent requests is paced instead of firing at once.
+ */
+class RequestPacer {
+  private scheduledStart = 0;
+  private tail: Promise<void> = Promise.resolve();
+
+  constructor(private readonly intervalMs: number) {}
+
+  async waitForSlot(): Promise<void> {
+    if (this.intervalMs <= 0) return;
+    const slot = this.tail.then(async () => {
+      let waitMs = this.scheduledStart - performance.now();
+      while (waitMs > 0) {
+        await wait(Math.min(Math.ceil(waitMs), 2_147_483_647));
+        waitMs = this.scheduledStart - performance.now();
+      }
+      // A late timer must not let subsequent requests catch up in a burst.
+      this.scheduledStart = performance.now() + this.intervalMs;
+    });
+    this.tail = slot.then(
+      () => undefined,
+      () => undefined,
+    );
+    await slot;
+  }
+}
+
+/** Combine the configured delay with any Crawl-delay or Request-rate the origin declares. */
+function resolvePacing(options: CrawlOptions): CrawlPacing {
+  const configuredDelayMs = options.delayMs ?? 0;
+  assertSafeInteger(configuredDelayMs, "delayMs", 0);
+
+  let robotsDelaySeconds: number | undefined;
+  if (options.respectRobots && options.honorCrawlDelay !== false) {
+    const declared = options.agents
+      .map((agent) => robotsCrawlDelaySeconds(options.robots, agent.userAgent))
+      .filter((seconds): seconds is number => seconds !== undefined);
+    if (declared.length > 0) robotsDelaySeconds = Math.max(...declared);
+  }
+
+  const robotsDelayMs = Math.ceil((robotsDelaySeconds ?? 0) * 1_000);
+  const delayMs = Math.max(configuredDelayMs, Math.min(robotsDelayMs, MAX_HONORED_DELAY_MS));
+  return {
+    delayMs,
+    ...(robotsDelaySeconds === undefined ? {} : { robotsDelaySeconds }),
+    clamped: robotsDelayMs > delayMs,
+  };
+}
+
 /** Crawl a bounded same-origin route graph using deterministic breadth-first traversal. */
 export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   const normalizedBase = normalizeUrl(options.baseUrl, options.baseUrl, "keep");
@@ -92,6 +163,8 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   const maxDepth = options.maxDepth;
   const concurrency = options.concurrency;
   const requestLimiter = new RequestLimiter(concurrency);
+  const pacing = resolvePacing(options);
+  const requestPacer = new RequestPacer(pacing.delayMs);
   const initial = collectInitialCandidates(options, normalizedBase);
   const initialWithinDepth = initial.filter((candidate) => candidate.depth <= maxDepth);
   const routes = new Map<string, MutableRoute>();
@@ -125,7 +198,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
       const results = await Promise.all(
         batch.map(async (route) => ({
           route,
-          snapshots: await captureAgents(route.url, options, requestLimiter),
+          snapshots: await captureAgents(route.url, options, requestLimiter, requestPacer),
         })),
       );
 
@@ -180,6 +253,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   return {
     routes: [...routes.values()].sort(compareRouteDepth).map(toRouteNode),
     truncated,
+    pacing,
   };
 }
 
@@ -267,7 +341,9 @@ function collectInitialCandidates(
   }
   for (const candidate of options.candidates) {
     const priority = candidate.sources.some(
-      (source) => source.kind === "redirect-contract" && source.detail === "source",
+      (source) =>
+        source.kind === "redirect-contract" &&
+        (source.detail === "source" || source.detail === "sample"),
     )
       ? 0
       : 1;
@@ -288,7 +364,11 @@ function addInitial(
   normalizedBase: string,
   priority: number,
 ): void {
-  const url = normalizeUrl(candidate.url, normalizedBase, options.queryPolicy);
+  // A declared redirect source is addressed exactly as written, including any query string.
+  const queryPolicy = candidate.sources.some((source) => source.kind === "redirect-contract")
+    ? "keep"
+    : options.queryPolicy;
+  const url = normalizeUrl(candidate.url, normalizedBase, queryPolicy);
   if (url === undefined || !isSameOrigin(url, normalizedBase)) return;
   if (!isUrlIncluded(url, options.include, options.exclude)) return;
   const depth = Number.isSafeInteger(candidate.depth) && candidate.depth >= 0 ? candidate.depth : 0;
@@ -318,6 +398,7 @@ async function captureAgents(
   url: string,
   options: CrawlOptions,
   requestLimiter: RequestLimiter,
+  requestPacer: RequestPacer,
 ): Promise<readonly PageSnapshot[]> {
   return Promise.all(
     options.agents.map((agent) => {
@@ -327,15 +408,16 @@ async function captureAgents(
           return Promise.resolve(blockedSnapshot(url, agent, decision.unavailableMessage));
         }
       }
-      return requestLimiter.run(() =>
-        capturePage(url, {
+      return requestLimiter.run(async () => {
+        return capturePage(url, {
           agent,
           headers: options.headers,
           timeoutMs: options.timeoutMs,
           maxBytes: options.maxBytes,
           maxRedirects: options.maxRedirects,
-        }),
-      );
+          beforeRequest: () => requestPacer.waitForSlot(),
+        });
+      });
     }),
   );
 }

@@ -5,6 +5,7 @@ import type {
   RouteSource,
   SitemapInventory,
 } from "../types.js";
+import { normalizeUrl } from "../url.js";
 
 const MAX_URL_LENGTH = 8_192;
 
@@ -82,7 +83,10 @@ export function mergeRouteCandidates(
   const base = parseBaseUrl(baseUrl);
   const merged = new Map<string, RouteCandidate>();
   for (const candidate of candidates) {
-    const url = normalizeCandidateUrl(candidate.url, base, queryPolicy);
+    // Validate all candidates, but retain the exact query ordering/encoding of contracts.
+    const contract = candidate.sources.some((source) => source.kind === "redirect-contract");
+    let url = normalizeCandidateUrl(candidate.url, base, contract ? "keep" : queryPolicy);
+    if (url !== undefined && contract) url = normalizeUrl(candidate.url, base.href, "keep");
     if (!url || new URL(url).origin !== base.origin) continue;
     const existing = merged.get(url);
     if (!existing) {
