@@ -2,6 +2,22 @@
 
 All notable changes are documented here. This project follows semantic versioning.
 
+## 0.5.0 - 2026-11-05
+
+### Added
+
+- Structured-data evidence for every JSON-LD block, including its `@type` values, `@id` values, a content fingerprint, and whether its `@context` names Schema.org. Reports never retain the JSON-LD payload. New findings cover unreadable blocks, missing context or type, identical repeated blocks, and conflicting blocks for the same `@id`.
+- Open Graph and Twitter card capture, with opt-in `audit.requireOpenGraph` and `audit.requireOgImage` requirements. Both work with global and path-scoped audit configuration, and missing tags use dedicated finding codes.
+- Rendered-DOM comparison for structured data and social metadata, reporting JSON-LD or Open Graph tags that appear only after JavaScript runs.
+- `routelint explain <code>` prints the matching rule, its default severity, and a documentation link from the rule reference bundled with the package.
+- Finding codes in HTML reports link to the rule reference, and SARIF rules carry a `helpUri`.
+
+### Changed
+
+- JSON report schema is now version 5. The report reader and diff command remain compatible with schemas 1, 2, 3, and 4.
+- Raw and rendered snapshots record structured-data and social-metadata evidence. The new fields are optional so older reports still validate.
+- The starter configuration, README, and finding reference document the new checks and their limits.
+
 ## 0.4.0 - 2026-09-21
 
 ### Added

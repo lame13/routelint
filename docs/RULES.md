@@ -54,6 +54,31 @@ A contract source is exempt from the generic `redirected-route` and ordinary pag
 | `soft-404` | A successful response exactly matches a captured 404/410 body. |
 | `possible-soft-404` | A successful response closely resembles a captured error body, or a short response uses a not-found-looking title or H1. |
 
+### Structured data and social metadata
+
+| Code | Default severity | Meaning |
+| --- | --- | --- |
+| `invalid-json-ld` | warning | A JSON-LD block is empty, is not valid JSON, or does not contain an object or array of objects. |
+| `json-ld-missing-context` | warning | A JSON-LD block has no `@context`, so it is not treated as Schema.org data. |
+| `json-ld-missing-type` | warning | A JSON-LD block has no `@type`. |
+| `duplicate-json-ld` | warning | One route repeats an identical JSON-LD block. |
+| `conflicting-json-ld-id` | warning | One route declares different JSON-LD for the same `@id`. |
+| `rendered-only-json-ld` | warning | Valid structured data appears only after JavaScript runs. |
+| `missing-og-title` | error | Opt-in: the server-rendered HTML has no `og:title`. |
+| `missing-og-description` | warning | Opt-in: the server-rendered HTML has no `og:description`. |
+| `missing-og-image` | warning | Opt-in: the server-rendered HTML has no `og:image`. |
+| `rendered-only-og` | warning | Open Graph or Twitter metadata appears only after JavaScript runs. |
+
+Structured-data checks are structural, not a Schema.org validator. RouteLint records block types, `@id` values, a content fingerprint, and structural problems. It never stores the JSON-LD payload in a report and ignores blocks inside inert `<template>` content. It does not claim that a page is eligible for a rich result or validate the required properties for every Schema.org type. Use a dedicated rich-results test for that final check.
+
+Open Graph and Twitter-card requirements are opt-in. `audit.requireOpenGraph` requires `og:title` and `og:description`; `audit.requireOgImage` requires `og:image`:
+
+```yaml
+audit:
+  requireOpenGraph: true
+  requireOgImage: true
+```
+
 ## Site graph
 
 | Code | Meaning |

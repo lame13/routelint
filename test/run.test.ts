@@ -185,8 +185,8 @@ describe("runRouteLint", () => {
     const findingCodes = report.findings.map((finding) => finding.code);
 
     expect(report).toMatchObject({
-      schemaVersion: "4",
-      toolVersion: "0.4.0",
+      schemaVersion: "5",
+      toolVersion: "0.5.0",
       baseUrl: `${origin}/`,
       truncated: false,
       config: {
@@ -453,7 +453,7 @@ describe("runRouteLint", () => {
       ],
     });
 
-    expect(report.schemaVersion).toBe("4");
+    expect(report.schemaVersion).toBe("5");
     expect(report.redirectContracts).toMatchObject({
       patterns: 1,
       patternMatches: 1,

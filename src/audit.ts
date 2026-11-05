@@ -13,6 +13,7 @@ import type {
   RouteNode,
   Severity,
   SitemapInventory,
+  SocialSignal,
 } from "./types.js";
 import { isUrlIncluded } from "./url.js";
 
@@ -153,6 +154,8 @@ function optionsForRoute(options: AuditOptions, url: string): AuditOptions {
       ...(scope.requireSitemapCoverage === undefined
         ? {}
         : { requireSitemapCoverage: scope.requireSitemapCoverage }),
+      ...(scope.requireOpenGraph === undefined ? {} : { requireOpenGraph: scope.requireOpenGraph }),
+      ...(scope.requireOgImage === undefined ? {} : { requireOgImage: scope.requireOgImage }),
       ...(scope.maxDepth === undefined ? {} : { maxDepth: scope.maxDepth }),
       ...(scope.maxResponseMs === undefined ? {} : { maxResponseMs: scope.maxResponseMs }),
       ...(scope.maxRedirectHopMs === undefined ? {} : { maxRedirectHopMs: scope.maxRedirectHopMs }),
@@ -415,7 +418,112 @@ function checkPage(
     });
   }
 
+  checkRichMetadata(findings, route, options, snapshot);
   checkRenderedEvidence(findings, route, snapshot);
+}
+
+function checkRichMetadata(
+  findings: Finding[],
+  route: RouteNode,
+  options: AuditOptions,
+  snapshot: PageSnapshot,
+): void {
+  const blocks = snapshot.signals.structuredData ?? [];
+  const social = snapshot.signals.social ?? [];
+  const firstBlockByHash = new Map<string, number>();
+  const firstBlockById = new Map<string, { readonly block: number; readonly sha256: string }>();
+
+  for (const [index, block] of blocks.entries()) {
+    const blockNumber = index + 1;
+    if (!block.valid) {
+      pushFinding(findings, {
+        code: "invalid-json-ld",
+        severity: "warning",
+        url: route.url,
+        message: `The route has a JSON-LD block that could not be read: ${block.error ?? "unknown problem"}`,
+        evidence: { block: blockNumber },
+      });
+      continue;
+    }
+
+    if (block.context === "missing") {
+      pushFinding(findings, {
+        code: "json-ld-missing-context",
+        severity: "warning",
+        url: route.url,
+        message: "A JSON-LD block has no @context and will not be treated as Schema.org data.",
+        evidence: { block: blockNumber },
+      });
+    }
+    if (block.types.length === 0) {
+      pushFinding(findings, {
+        code: "json-ld-missing-type",
+        severity: "warning",
+        url: route.url,
+        message: "A JSON-LD block has no @type.",
+        evidence: { block: blockNumber },
+      });
+    }
+
+    const duplicateOf = firstBlockByHash.get(block.sha256);
+    if (duplicateOf === undefined) {
+      firstBlockByHash.set(block.sha256, blockNumber);
+    } else {
+      pushFinding(findings, {
+        code: "duplicate-json-ld",
+        severity: "warning",
+        url: route.url,
+        message: "The route repeats an identical JSON-LD block.",
+        evidence: { block: blockNumber, firstBlock: duplicateOf },
+      });
+    }
+
+    for (const id of block.ids) {
+      const previous = firstBlockById.get(id);
+      if (previous === undefined) {
+        firstBlockById.set(id, { block: blockNumber, sha256: block.sha256 });
+      } else if (previous.sha256 !== block.sha256) {
+        pushFinding(findings, {
+          code: "conflicting-json-ld-id",
+          severity: "warning",
+          url: route.url,
+          message: "The route declares different JSON-LD for the same @id.",
+          evidence: { id, firstBlock: previous.block, block: blockNumber },
+        });
+      }
+    }
+  }
+
+  if (options.requireOpenGraph === true) {
+    if (!hasSocialProperty(social, "og:title")) {
+      pushFinding(findings, {
+        code: "missing-og-title",
+        severity: "error",
+        url: route.url,
+        message: "The server-rendered HTML has no Open Graph title.",
+      });
+    }
+    if (!hasSocialProperty(social, "og:description")) {
+      pushFinding(findings, {
+        code: "missing-og-description",
+        severity: "warning",
+        url: route.url,
+        message: "The server-rendered HTML has no Open Graph description.",
+      });
+    }
+  }
+  if (options.requireOgImage === true && !hasSocialProperty(social, "og:image")) {
+    pushFinding(findings, {
+      code: "missing-og-image",
+      severity: "warning",
+      url: route.url,
+      message: "The server-rendered HTML has no Open Graph image.",
+    });
+  }
+}
+
+function hasSocialProperty(signals: readonly SocialSignal[], property: string): boolean {
+  return signals.some((signal) => signal.property === property && signal.value.length > 0);
 }
 
 function checkRenderedEvidence(
@@ -514,6 +622,32 @@ function checkRenderedEvidence(
       severity: "warning",
       url: route.url,
       message: "The primary heading appears only after JavaScript runs.",
+    });
+  }
+
+  const rawStructuredData = (snapshot.signals.structuredData ?? []).filter(
+    (block) => block.valid && block.types.length > 0,
+  ).length;
+  const renderedStructuredData = (rendered.signals.structuredData ?? []).filter(
+    (block) => block.valid && block.types.length > 0,
+  ).length;
+  if (rawStructuredData === 0 && renderedStructuredData > 0) {
+    pushFinding(findings, {
+      code: "rendered-only-json-ld",
+      severity: "warning",
+      url: route.url,
+      message: "Structured data appears only after JavaScript runs.",
+      evidence: { renderedBlocks: renderedStructuredData },
+    });
+  }
+
+  if ((snapshot.signals.social ?? []).length === 0 && (rendered.signals.social ?? []).length > 0) {
+    pushFinding(findings, {
+      code: "rendered-only-og",
+      severity: "warning",
+      url: route.url,
+      message: "Open Graph or Twitter metadata appears only after JavaScript runs.",
+      evidence: { renderedProperties: (rendered.signals.social ?? []).length },
     });
   }
 }

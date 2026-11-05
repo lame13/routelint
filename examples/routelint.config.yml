@@ -45,6 +45,8 @@ audit:
   requireCanonical: true
   requireH1: true
   requireSitemapCoverage: true
+  requireOpenGraph: false
+  requireOgImage: false
   maxDepth: 4
   maxResponseMs: 1000
   maxRedirectHopMs: 500

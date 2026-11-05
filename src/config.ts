@@ -44,6 +44,8 @@ const auditRequirementOverrides = {
   requireCanonical: z.boolean().optional(),
   requireH1: z.boolean().optional(),
   requireSitemapCoverage: z.boolean().optional(),
+  requireOpenGraph: z.boolean().optional(),
+  requireOgImage: z.boolean().optional(),
   maxDepth: nonNegativeInteger.optional(),
   maxResponseMs: positiveInteger.optional(),
   maxRedirectHopMs: positiveInteger.optional(),
@@ -182,6 +184,8 @@ const DEFAULT_AUDIT: AuditOptions = Object.freeze({
   requireCanonical: true,
   requireH1: true,
   requireSitemapCoverage: true,
+  requireOpenGraph: false,
+  requireOgImage: false,
   maxDepth: 4,
   severities: {},
   paths: [],
@@ -436,6 +440,8 @@ function resolvePathAuditOptions(raw: RawConfig): readonly PathAuditOptions[] {
     ...(scope.requireSitemapCoverage === undefined
       ? {}
       : { requireSitemapCoverage: scope.requireSitemapCoverage }),
+    ...(scope.requireOpenGraph === undefined ? {} : { requireOpenGraph: scope.requireOpenGraph }),
+    ...(scope.requireOgImage === undefined ? {} : { requireOgImage: scope.requireOgImage }),
     ...(scope.maxDepth === undefined ? {} : { maxDepth: scope.maxDepth }),
     ...(scope.maxResponseMs === undefined ? {} : { maxResponseMs: scope.maxResponseMs }),
     ...(scope.maxRedirectHopMs === undefined ? {} : { maxRedirectHopMs: scope.maxRedirectHopMs }),
@@ -492,6 +498,8 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Route
     requireH1: raw.audit?.requireH1 ?? DEFAULT_AUDIT.requireH1,
     requireSitemapCoverage:
       raw.audit?.requireSitemapCoverage ?? DEFAULT_AUDIT.requireSitemapCoverage,
+    requireOpenGraph: raw.audit?.requireOpenGraph ?? false,
+    requireOgImage: raw.audit?.requireOgImage ?? false,
     maxDepth: raw.audit?.maxDepth ?? DEFAULT_AUDIT.maxDepth,
     ...(raw.audit?.maxResponseMs === undefined ? {} : { maxResponseMs: raw.audit.maxResponseMs }),
     ...(raw.audit?.maxRedirectHopMs === undefined
@@ -600,6 +608,9 @@ audit:
   requireH1: true
   requireSitemapCoverage: true
   maxDepth: 4
+  # Social metadata requirements are opt-in:
+  # requireOpenGraph: true
+  # requireOgImage: true
   # Response-time budgets are opt-in. Uncomment to report slow routes and hops.
   # maxResponseMs: 1000
   # maxRedirectHopMs: 500

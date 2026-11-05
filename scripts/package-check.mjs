@@ -111,7 +111,7 @@ try {
     );
   }
   const help = await run(node, [cli, "--help"], { cwd: temporary });
-  for (const command of ["check", "next", "diff", "init"]) {
+  for (const command of ["check", "next", "diff", "explain", "init"]) {
     if (!help.stdout.includes(command))
       throw new Error(`Installed CLI help is missing ${command}.`);
   }

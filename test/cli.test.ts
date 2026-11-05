@@ -107,6 +107,7 @@ describe("packaged-style CLI execution", () => {
     expect(topLevel.stdout).toContain("check");
     expect(topLevel.stdout).toContain("next");
     expect(topLevel.stdout).toContain("diff");
+    expect(topLevel.stdout).toContain("explain");
     expect(topLevel.stdout).toContain("init");
     expect(check).toMatchObject({ code: 0, stderr: "" });
     expect(check.stdout).toContain("Usage: routelint check [options] [base-url]");
@@ -219,6 +220,23 @@ describe("packaged-style CLI execution", () => {
       summary: { errors: 1 },
       changes: [{ code: "finding-added:new-error", severity: "error" }],
     });
+  });
+
+  it("explains a finding code from the bundled rule reference", async () => {
+    const directory = await temporaryDirectory();
+    const known = await runCli(["explain", "missing-title"], directory);
+    const severity = await runCli(["explain", "invalid-json-ld"], directory);
+    const unknown = await runCli(["explain", "not-a-real-code"], directory);
+
+    expect(known.code).toBe(0);
+    expect(known.stderr).toBe("");
+    expect(known.stdout).toContain("missing-title");
+    expect(known.stdout).toContain("Required server-rendered metadata is absent.");
+    expect(known.stdout).toContain("https://github.com/lame13/routelint/blob/main/docs/RULES.md");
+    expect(severity.stdout).toContain("Default severity: warning");
+    expect(unknown.code).toBe(2);
+    expect(unknown.stdout).toBe("");
+    expect(unknown.stderr).toContain("Unknown finding code: not-a-real-code");
   });
 
   it.each([

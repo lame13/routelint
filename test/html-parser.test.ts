@@ -138,6 +138,8 @@ describe("parseHtml", () => {
         },
       ],
       hreflangs: [],
+      social: [],
+      structuredData: [],
     });
   });
 
@@ -152,6 +154,75 @@ describe("parseHtml", () => {
     expect(signals.h1s).toEqual([{ value: "Visible", location: "body" }]);
     expect(signals.robots).toEqual([]);
     expect(signals.links).toEqual([]);
+  });
+
+  it("captures JSON-LD identities and Open Graph or Twitter metadata", () => {
+    const signals = parseHtml(
+      `<html lang="en"><head>
+        <meta property="og:title" content="  A shareable title  ">
+        <meta name="twitter:card" content="summary_large_image">
+        <meta property="og:title" content="   ">
+      </head><body>
+        <script type="application/ld+json">
+          {"@context":"https://schema.org","@type":["Product","Thing"],
+           "@id":"#product","offers":{"@type":"Offer"}}
+        </script>
+        <script type="application/ld+json; charset=utf-8">
+          {"@context":"https://schema.org","@graph":[
+            {"@type":"BreadcrumbList","@id":"#crumbs"},
+            {"@type":"ListItem"}
+          ]}
+        </script>
+      </body></html>`,
+      "https://example.test/product",
+    );
+
+    expect(signals.social).toEqual([
+      { property: "og:title", value: "A shareable title", location: "head" },
+      { property: "twitter:card", value: "summary_large_image", location: "head" },
+    ]);
+    expect(signals.structuredData).toHaveLength(2);
+    expect(signals.structuredData?.[0]).toMatchObject({
+      types: ["Product", "Thing"],
+      ids: ["#product"],
+      context: "schema.org",
+      valid: true,
+    });
+    expect(signals.structuredData?.[0]?.sha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(signals.structuredData?.[1]).toMatchObject({
+      types: ["BreadcrumbList", "ListItem"],
+      ids: ["#crumbs"],
+      context: "schema.org",
+      valid: true,
+    });
+  });
+
+  it("marks unreadable JSON-LD without retaining its payload or template contents", () => {
+    const signals = parseHtml(
+      `<head>
+        <script type="application/ld+json">{"@type":"Thing"}</script>
+        <script type="application/ld+json">{not json}</script>
+        <script type="application/ld+json">["not", "a node"]</script>
+        <script type="application/ld+json">   </script>
+        <script type="application/ld+json">{"@context":"https://schema.org","@type":"Thing"}</script>
+        <script type="application/ld+json">{"@context":"https://schema.org","@type":"Thing"}</script>
+        <template><script type="application/ld+json">{"@type":"Hidden"}</script></template>
+      </head>`,
+      "https://example.test/",
+    );
+
+    const blocks = signals.structuredData ?? [];
+    expect(blocks).toHaveLength(6);
+    expect(blocks[0]).toMatchObject({ valid: true, context: "missing", types: ["Thing"] });
+    expect(blocks[1]).toMatchObject({
+      valid: false,
+      error: "The JSON-LD block is not valid JSON.",
+    });
+    expect(blocks[2]?.valid).toBe(false);
+    expect(blocks[3]).toMatchObject({ valid: false, error: "The JSON-LD block is empty." });
+    expect(blocks[4]?.sha256).toBe(blocks[5]?.sha256);
+    expect(blocks.some((block) => block.types.includes("Hidden"))).toBe(false);
+    expect(JSON.stringify(blocks)).not.toContain("not a node");
   });
 });
 

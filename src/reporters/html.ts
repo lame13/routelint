@@ -1,4 +1,5 @@
 import { getSnapshotIndexability } from "../audit.js";
+import { findingDocsUrl } from "../rules.js";
 import type {
   Finding,
   PageCompletion,
@@ -313,7 +314,7 @@ function renderFindingRows(findings: readonly Finding[]): string {
     .map(
       (finding) => `<tr data-finding-row data-severity="${finding.severity}">
         <td>${severityBadge(finding.severity)}</td>
-        <td><code>${escapeHtml(finding.code)}</code></td>
+        <td><code>${escapeHtml(finding.code)}</code><a class="finding-docs" href="${escapeHtml(findingDocsUrl(finding.code))}" target="_blank" rel="noreferrer">docs</a></td>
         <td>${
           finding.url === undefined
             ? '<span class="muted">Site-wide</span>'
@@ -576,6 +577,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .evidence-complete { color: var(--complete); }
 .evidence-incomplete { color: var(--warning); font-weight: 700; }
 .finding-message { max-width: 55ch; margin: 0; }
+.finding-docs { display: inline-block; margin-left: 0.4rem; color: #0755a3; font-size: 0.74rem; }
 .evidence-list { margin: 0; }
 .evidence-list div { display: grid; grid-template-columns: minmax(5rem, auto) 1fr; gap: 0.45rem; }
 .evidence-list dt { color: var(--muted); }

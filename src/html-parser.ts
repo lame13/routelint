@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { Parser } from "htmlparser2";
 import type {
   HreflangSignal,
@@ -5,6 +7,8 @@ import type {
   MetadataSignal,
   PageSignals,
   RobotsSignal,
+  SocialSignal,
+  StructuredDataSignal,
 } from "./types.js";
 
 interface TextCapture {
@@ -33,6 +37,8 @@ export function emptyPageSignals(): PageSignals {
     h1s: [],
     links: [],
     hreflangs: [],
+    social: [],
+    structuredData: [],
   };
 }
 
@@ -43,11 +49,14 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
   const canonicals: MetadataSignal[] = [];
   const robots: RobotsSignal[] = [];
   const h1s: MetadataSignal[] = [];
+  const social: SocialSignal[] = [];
+  const structuredData: StructuredDataSignal[] = [];
   const pendingLinks: AnchorCapture[] = [];
   const pendingHreflangs: PendingHreflang[] = [];
   const openAnchors: AnchorCapture[] = [];
   const titleCaptures: TextCapture[] = [];
   const h1Captures: TextCapture[] = [];
+  const jsonLdCapture: { chunks: string[] | null } = { chunks: null };
   let headDepth = 0;
   let templateDepth = 0;
   let ignoredTextDepth = 0;
@@ -64,6 +73,7 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
         if (templateDepth > 0) return;
         if (tag === "head") headDepth += 1;
         if (tag === "script" || tag === "style") ignoredTextDepth += 1;
+        if (tag === "script" && isJsonLdScript(attributes.type)) jsonLdCapture.chunks = [];
 
         if (tag === "html" && htmlLang === undefined) {
           if (Object.hasOwn(attributes, "lang"))
@@ -76,7 +86,7 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
         } else if (tag === "h1") {
           h1Captures.push({ location: location(), chunks: [] });
         } else if (tag === "meta") {
-          captureMeta(attributes, location(), descriptions, robots);
+          captureMeta(attributes, location(), descriptions, robots, social);
         } else if (tag === "link") {
           captureHeadLink(attributes, location(), canonicals, pendingHreflangs);
         } else if (tag === "a" && Object.hasOwn(attributes, "href")) {
@@ -93,7 +103,12 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
         }
       },
       ontext(value) {
-        if (templateDepth > 0 || ignoredTextDepth > 0) return;
+        if (templateDepth > 0) return;
+        if (jsonLdCapture.chunks !== null) {
+          jsonLdCapture.chunks.push(value);
+          return;
+        }
+        if (ignoredTextDepth > 0) return;
         titleCaptures.at(-1)?.chunks.push(value);
         h1Captures.at(-1)?.chunks.push(value);
         openAnchors.at(-1)?.chunks.push(value);
@@ -111,6 +126,10 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
           const anchor = openAnchors.pop();
           if (anchor !== undefined) pendingLinks.push(anchor);
         }
+        if (tag === "script" && jsonLdCapture.chunks !== null) {
+          structuredData.push(structuredDataSignal(jsonLdCapture.chunks.join("")));
+          jsonLdCapture.chunks = null;
+        }
         if (tag === "script" || tag === "style") {
           ignoredTextDepth = Math.max(0, ignoredTextDepth - 1);
         }
@@ -121,6 +140,10 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
   );
 
   parser.end(html);
+  if (jsonLdCapture.chunks !== null) {
+    structuredData.push(structuredDataSignal(jsonLdCapture.chunks.join("")));
+    jsonLdCapture.chunks = null;
+  }
   while (titleCaptures.length > 0) finishTextCapture(titleCaptures, titles);
   while (h1Captures.length > 0) finishTextCapture(h1Captures, h1s);
   while (openAnchors.length > 0) {
@@ -157,6 +180,8 @@ export function parseHtml(html: string, documentUrl: string): PageSignals {
     h1s,
     links,
     hreflangs,
+    social,
+    structuredData,
     ...(htmlLang === undefined ? {} : { htmlLang }),
     ...(baseHref === undefined ? {} : { baseHref }),
   };
@@ -194,7 +219,9 @@ function captureMeta(
   location: MetadataSignal["location"],
   descriptions: MetadataSignal[],
   robots: RobotsSignal[],
+  social: SocialSignal[],
 ): void {
+  captureSocial(attributes, location, social);
   const name = cleanOptional(attributes.name)?.toLowerCase();
   if (name === undefined || !Object.hasOwn(attributes, "content")) return;
   const content = collapseWhitespace(attributes.content ?? "");
@@ -202,6 +229,121 @@ function captureMeta(
   if (name === "robots" || name === "googlebot" || name === "bingbot") {
     robots.push({ value: content, location, audience: name, source: "meta" });
   }
+}
+
+const SOCIAL_PROPERTY = /^(?:og|twitter):[a-z0-9_.:-]+$/;
+
+function captureSocial(
+  attributes: Readonly<Record<string, string>>,
+  location: MetadataSignal["location"],
+  social: SocialSignal[],
+): void {
+  const rawProperty = attributes.property ?? attributes.name;
+  if (rawProperty === undefined || !Object.hasOwn(attributes, "content")) return;
+  const property = collapseWhitespace(rawProperty).toLowerCase();
+  if (!SOCIAL_PROPERTY.test(property)) return;
+  const value = collapseWhitespace(attributes.content ?? "");
+  if (value.length === 0) return;
+  social.push({ property, value, location });
+}
+
+function isJsonLdScript(type: string | undefined): boolean {
+  return type !== undefined && /^application\/ld\+json(?:\s*;|$)/i.test(type.trim());
+}
+
+function structuredDataSignal(source: string): StructuredDataSignal {
+  const normalized = source.replace(/\s+/gu, " ").trim();
+  const sha256 = createHash("sha256").update(normalized).digest("hex");
+  if (normalized.length === 0) {
+    return invalidStructuredData(sha256, "The JSON-LD block is empty.");
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    return invalidStructuredData(sha256, "The JSON-LD block is not valid JSON.");
+  }
+
+  const nodes = structuredDataNodes(value);
+  if (nodes === undefined) {
+    return invalidStructuredData(
+      sha256,
+      "The JSON-LD block must contain an object or an array of objects.",
+    );
+  }
+
+  const types = new Set<string>();
+  const ids = new Set<string>();
+  for (const node of nodes) {
+    for (const type of stringValues(node["@type"], 120)) types.add(type);
+    for (const id of stringValues(node["@id"], 300)) ids.add(id);
+  }
+
+  return {
+    types: [...types].slice(0, 50),
+    ids: [...ids].slice(0, 50),
+    sha256,
+    context: contextState(value),
+    valid: true,
+  };
+}
+
+function invalidStructuredData(sha256: string, error: string): StructuredDataSignal {
+  return { types: [], ids: [], sha256, context: "missing", valid: false, error };
+}
+
+function structuredDataNodes(
+  value: unknown,
+): ReadonlyArray<Readonly<Record<string, unknown>>> | undefined {
+  const roots = Array.isArray(value) ? value : [value];
+  if (roots.length === 0 || !roots.every(isRecord)) return undefined;
+
+  const nodes: Record<string, unknown>[] = [];
+  const queue: unknown[] = [...roots];
+  while (queue.length > 0 && nodes.length < 500) {
+    const node = queue.shift();
+    if (!isRecord(node)) continue;
+    nodes.push(node);
+    const graph = node["@graph"];
+    if (Array.isArray(graph)) queue.push(...graph);
+  }
+  return nodes;
+}
+
+function contextState(value: unknown): StructuredDataSignal["context"] {
+  const roots = Array.isArray(value) ? value : [value];
+  let present = false;
+  for (const root of roots) {
+    if (!isRecord(root) || !Object.hasOwn(root, "@context")) continue;
+    present = true;
+    if (mentionsSchemaOrg(root["@context"])) return "schema.org";
+  }
+  return present ? "other" : "missing";
+}
+
+function mentionsSchemaOrg(context: unknown): boolean {
+  if (typeof context === "string") {
+    return /(?:^|[./])schema\.org(?:[/#]|$)/i.test(context.trim());
+  }
+  if (Array.isArray(context)) return context.some(mentionsSchemaOrg);
+  if (isRecord(context)) {
+    const vocabulary = context["@vocab"];
+    return typeof vocabulary === "string" && mentionsSchemaOrg(vocabulary);
+  }
+  return false;
+}
+
+function stringValues(value: unknown, maxLength: number): readonly string[] {
+  const raw = Array.isArray(value) ? value : [value];
+  return raw
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => collapseWhitespace(item).slice(0, maxLength))
+    .filter((item) => item.length > 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function captureHeadLink(

@@ -22,6 +22,8 @@ Checks start with the HTML and headers your server returns. Add `--rendered` to 
 | HTTP delivery | Errors, redirect chains, final destinations, content types, response sizes, timeouts, and different responses for different bots |
 | Redirect contracts | Whether a redirect uses the expected first-hop status, reaches the right destination within the hop limit, and lands on a healthy target |
 | Server-rendered HTML | Missing or misplaced titles, descriptions, canonicals, robots directives, H1s, and language; empty shells, soft 404s, and duplicate body content |
+| Structured data | Malformed JSON-LD, missing `@context` or `@type`, repeated blocks, conflicting `@id` values, and structured data that appears only after JavaScript runs |
+| Social metadata | Open Graph and Twitter card tags, optional presence requirements, and tags that appear only after JavaScript runs |
 | Rendered comparison | Content and SEO tags that only appear after JavaScript runs, plus differences from the server response |
 | Link graph | Broken links, links through redirects or to `noindex` pages, orphan pages, dead ends, and pages buried too deep |
 | Indexing consistency | Sitemap URLs that redirect, fail, or use `noindex`; missing sitemap coverage; robots conflicts; unhealthy or shared canonical targets |
@@ -144,6 +146,7 @@ Playwright is optional; a normal RouteLint install does not download a browser. 
 routelint check [base-url]       Crawl and lint any HTTP(S) site
 routelint next [base-url]        Add Next.js build routes to the live crawl
 routelint diff <old> <new>       Compare two JSON reports
+routelint explain <code>         Explain a finding code from the bundled rule reference
 routelint init [file]            Write a documented starter config
 ```
 
@@ -226,6 +229,9 @@ audit:
   requireH1: true
   requireSitemapCoverage: true
   maxDepth: 4
+  # Social metadata requirements are opt-in:
+  # requireOpenGraph: true
+  # requireOgImage: true
   # Optional response-time budgets, in milliseconds:
   # maxResponseMs: 1000
   # maxRedirectHopMs: 500
@@ -299,6 +305,7 @@ RouteLint checks delivery and technical SEO. It does not:
 - calculate an SEO score;
 - claim browser equivalence unless `--rendered` was enabled and the capture completed;
 - diagnose hydration errors or user interactions;
+- validate Schema.org properties or predict rich-result eligibility;
 - calculate Core Web Vitals;
 - submit URLs to search engines;
 - crawl external links by default;

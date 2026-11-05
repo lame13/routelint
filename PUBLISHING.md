@@ -1,13 +1,13 @@
-# Publish RouteLint 0.4.0 from your Mac
+# Publish RouteLint 0.5.0 from your Mac
 
 Releases go through a pull request to protected `main`. After the PR is merged and CI passes, publish from your terminal using npm's interactive 2FA flow. GitHub Actions verifies the package; it does not publish it or need an npm token.
 
 ## 1. Prepare and verify the release
 
-Run these commands from the existing repository checkout. The release changes should already be present locally. Version 0.4.0 is already set in the package, lockfile, and CLI; its release notes are in `CHANGELOG.md`. Do not run `npm version` again:
+Run these commands from the existing repository checkout. The release changes should already be present locally. Version 0.5.0 is already set in the package, lockfile, and CLI; its release notes are in `CHANGELOG.md`. Do not run `npm version` again:
 
 ```bash
-git switch -c release/0.4.0
+git switch -c release/0.5.0
 nvm install
 nvm use
 node --version
@@ -39,20 +39,20 @@ If needed, install GitHub CLI with `brew install gh` and sign in with `gh auth l
 
 ```bash
 git add README.md CHANGELOG.md PUBLISHING.md package.json package-lock.json \
-  docs/REDIRECTS.md docs/RULES.md examples/routelint.config.yml src test
+  docs examples scripts src test
 git diff --cached --check
 git diff --cached --stat
-git commit -m "Release RouteLint 0.4.0" \
-  -m "Add redirect patterns, response-time budgets, crawl pacing, and Markdown/CSV/JUnit reports. Fix query preservation, pacing, report redaction, and output escaping. Verified with npm run check."
-git push -u origin release/0.4.0
-gh pr create --base main --head release/0.4.0 --fill
-gh pr checks release/0.4.0 --watch
+git commit -m "Release RouteLint 0.5.0" \
+  -m "Add structured data and social metadata checks, rendered-only metadata findings, the explain command, finding documentation links, and JSON report schema 5. Verified with npm run check."
+git push -u origin release/0.5.0
+gh pr create --base main --head release/0.5.0 --fill
+gh pr checks release/0.5.0 --watch
 ```
 
 Review the PR and satisfy the branch's required checks and approvals, then merge it:
 
 ```bash
-gh pr merge release/0.4.0 --merge --delete-branch
+gh pr merge release/0.5.0 --merge --delete-branch
 ```
 
 If the repository uses a merge queue, wait for the PR to reach the merged state before continuing. Refresh your checkout and verify CI for that commit on `main`:
@@ -67,14 +67,14 @@ gh run watch RUN_ID --exit-status
 
 Keep this merged commit checked out through publication and tagging. CI runs the full checks on Linux with Node 22.12 and 24, plus installed-package smoke tests on macOS and Windows. Publish only once the merged commit is green.
 
-## 3. Publish 0.4.0 interactively
+## 3. Publish 0.5.0 interactively
 
 Start from the clean, merged checkout. Confirm the package version and inspect the registry so you do not attempt to publish an existing version:
 
 ```bash
 git status --short
 test -z "$(git status --porcelain)"
-test "$(node -p "require('./package.json').version")" = "0.4.0"
+test "$(node -p "require('./package.json').version")" = "0.5.0"
 npm pkg get name version repository homepage
 npm view routelint version versions dist-tags
 ```
@@ -112,9 +112,9 @@ NPM_CONFIG_PROVENANCE=false npm publish --access public --tag latest
 After publication succeeds, verify the registry and installed CLI, then clear the regenerated build output and test caches:
 
 ```bash
-npm view routelint@0.4.0 version dist.integrity repository.url engines
+npm view routelint@0.5.0 version dist.integrity repository.url engines
 npm view routelint dist-tags
-npx --yes routelint@0.4.0 --version
+npx --yes routelint@0.5.0 --version
 node scripts/clean.mjs
 rm -rf node_modules/.vite node_modules/.vite-temp
 git status --short
@@ -128,16 +128,16 @@ From the same merged commit you just published:
 
 ```bash
 test -z "$(git status --porcelain)"
-git tag -a v0.4.0 -m "RouteLint v0.4.0"
-git push origin v0.4.0
+git tag -a v0.5.0 -m "RouteLint v0.5.0"
+git push origin v0.5.0
 release_notes=$(mktemp)
-awk '/^## 0\.4\.0 / { printing=1; next } printing && /^## / { exit } printing { print }' \
+awk '/^## 0\.5\.0 / { printing=1; next } printing && /^## / { exit } printing { print }' \
   CHANGELOG.md > "$release_notes"
-gh release create v0.4.0 \
+gh release create v0.5.0 \
   --verify-tag \
   --notes-file "$release_notes" \
   --latest \
-  --title "RouteLint v0.4.0"
+  --title "RouteLint v0.5.0"
 ```
 
 For the next release, update the package version, `src/version.ts`, lockfile, changelog, and this guide. Keep the same PR, CI, and interactive publishing sequence.
