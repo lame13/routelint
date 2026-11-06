@@ -6,6 +6,9 @@
 - `json` contains the complete route graph, evidence, findings, and run limits.
 - `sarif` maps findings to URL artifact locations for code-scanning tools.
 - `html` is one portable file with no external assets or network requests.
+- `markdown` summarizes findings for CI or review comments.
+- `csv` exports findings for spreadsheets.
+- `junit` maps errors and warnings to failed test cases for CI test reporters.
 
 ```bash
 routelint check https://example.com --format json -o report.json
@@ -17,7 +20,7 @@ routelint check https://example.com --format html -o report.html
 
 Reports include `schemaVersion`, `toolVersion`, and `generatedAt`. Object keys and route/finding order are deterministic for the same evidence. Timing values and generation dates naturally differ.
 
-Schema 2 adds text-free SSR body measurements and fingerprints, optional rendered snapshots, URL-list inventory, changed-only comparison metadata, and the effective crawl policy needed to reject misleading changed-only comparisons. Schema 3 adds configured redirect policy and structured redirect-contract checks. The report reader accepts schemas 1, 2, and 3.
+Schema 2 adds text-free SSR body measurements and fingerprints, optional rendered snapshots, URL-list inventory, changed-only comparison metadata, and the effective crawl policy needed to reject misleading changed-only comparisons. Schema 3 adds configured redirect policy and structured redirect-contract checks. Schema 4 adds redirect-pattern results and crawl-pacing policy. Schema 5 adds JSON-LD and social-metadata evidence to raw and rendered snapshots. The report reader accepts schemas 1–5.
 
 Request-header values are excluded. Schema 2 records only the normalized names of configured request headers so changed-only mode can detect a changed authentication mechanism without storing credentials. Response headers are allowlisted/redacted by the capture layer. URLs can still reveal private route names, so treat preview reports as potentially sensitive.
 

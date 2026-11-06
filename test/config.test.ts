@@ -24,6 +24,32 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 describe("loadConfig", () => {
+  it("loads opt-in social requirements globally and per path scope", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, "routelint.config.json"),
+      JSON.stringify({
+        baseUrl: "https://example.test",
+        audit: {
+          requireOpenGraph: true,
+          requireOgImage: true,
+          paths: [{ include: ["/legacy/**"], requireOpenGraph: false }],
+        },
+      }),
+    );
+
+    const config = await loadConfig({ cwd: directory });
+    expect(config.audit).toMatchObject({
+      requireOpenGraph: true,
+      requireOgImage: true,
+    });
+    expect(config.audit.paths?.[0]).toMatchObject({
+      include: ["/legacy/**"],
+      requireOpenGraph: false,
+    });
+    expect(config.audit.paths?.[0]).not.toHaveProperty("requireOgImage");
+  });
+
   it("merges samples from duplicate pattern declarations", async () => {
     const directory = await temporaryDirectory();
     await writeFile(

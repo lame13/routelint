@@ -209,6 +209,30 @@ export interface HreflangSignal {
   readonly resolvedUrl?: string;
 }
 
+export interface SocialSignal {
+  /** Normalized property name, such as `og:title` or `twitter:card`. */
+  readonly property: string;
+  readonly value: string;
+  readonly location: MetadataSignal["location"];
+}
+
+/**
+ * Structural evidence for one JSON-LD block. The parsed payload is never stored;
+ * only search-relevant identifiers and a fingerprint are retained.
+ */
+export interface StructuredDataSignal {
+  /** Deduplicated `@type` values, in document order. */
+  readonly types: readonly string[];
+  /** Deduplicated `@id` values, in document order. */
+  readonly ids: readonly string[];
+  /** SHA-256 of the normalized block text, used to detect exact duplicates. */
+  readonly sha256: string;
+  readonly context: "schema.org" | "other" | "missing";
+  readonly valid: boolean;
+  /** Structural problem text that never includes the JSON-LD payload. */
+  readonly error?: string;
+}
+
 export interface PageSignals {
   readonly titles: readonly MetadataSignal[];
   readonly descriptions: readonly MetadataSignal[];
@@ -217,6 +241,10 @@ export interface PageSignals {
   readonly h1s: readonly MetadataSignal[];
   readonly links: readonly LinkSignal[];
   readonly hreflangs: readonly HreflangSignal[];
+  /** Optional for compatibility with reports written before 0.5.0. */
+  readonly social?: readonly SocialSignal[];
+  /** Optional for compatibility with reports written before 0.5.0. */
+  readonly structuredData?: readonly StructuredDataSignal[];
   readonly htmlLang?: string;
   readonly baseHref?: string;
 }
@@ -397,6 +425,10 @@ export interface AuditOptions {
   readonly requireCanonical: boolean;
   readonly requireH1: boolean;
   readonly requireSitemapCoverage: boolean;
+  /** Require Open Graph title and description metadata. Disabled unless true. */
+  readonly requireOpenGraph?: boolean;
+  /** Require an Open Graph image. Disabled unless true. */
+  readonly requireOgImage?: boolean;
   readonly maxDepth: number;
   /** Report routes that took longer than this to capture. Absent disables the check. */
   readonly maxResponseMs?: number;
@@ -414,6 +446,8 @@ export interface PathAuditOptions {
   readonly requireCanonical?: boolean;
   readonly requireH1?: boolean;
   readonly requireSitemapCoverage?: boolean;
+  readonly requireOpenGraph?: boolean;
+  readonly requireOgImage?: boolean;
   readonly maxDepth?: number;
   readonly maxResponseMs?: number;
   readonly maxRedirectHopMs?: number;

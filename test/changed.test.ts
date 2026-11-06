@@ -37,6 +37,39 @@ function report(generatedAt: string, findings: readonly Finding[]): RouteLintRep
 }
 
 describe("changed-only reports", () => {
+  it("accepts legacy disabled social requirements but rejects newly enabled requirements", () => {
+    const legacy = report("2026-08-20T00:00:00.000Z", []);
+    const audit = {
+      requireTitle: true,
+      requireDescription: true,
+      requireCanonical: true,
+      requireH1: true,
+      requireSitemapCoverage: true,
+      maxDepth: 4,
+    };
+    const baseline = { ...legacy, schemaVersion: "4", config: { ...legacy.config, audit } };
+    const current = {
+      ...baseline,
+      schemaVersion: "5",
+      config: {
+        ...baseline.config,
+        audit: { ...audit, requireOpenGraph: false, requireOgImage: false },
+      },
+    };
+    expect(() => changedOnlyReport(current, baseline)).not.toThrow();
+    for (const requirement of ["requireOpenGraph", "requireOgImage"] as const) {
+      expect(() =>
+        changedOnlyReport(
+          {
+            ...current,
+            config: { ...current.config, audit: { ...current.config.audit, [requirement]: true } },
+          },
+          baseline,
+        ),
+      ).toThrow("audit policy differs");
+    }
+  });
+
   it("rejects different pacing settings while accepting missing legacy defaults", () => {
     const baseline = report("2026-08-20T00:00:00.000Z", []);
     const current = {

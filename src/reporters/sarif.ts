@@ -1,3 +1,4 @@
+import { findingDocsUrl } from "../rules.js";
 import type { Finding, RouteLintReport, Severity } from "../types.js";
 import { stableJson } from "./json.js";
 
@@ -21,6 +22,7 @@ interface SarifRule {
   readonly id: string;
   readonly name: string;
   readonly shortDescription: SarifMessage;
+  readonly helpUri: string;
   readonly defaultConfiguration: {
     readonly level: SarifLevel;
   };
@@ -64,6 +66,7 @@ function ruleFor(code: string, findings: readonly Finding[]): SarifRule {
     id: code,
     name: ruleName(code).replaceAll(" ", ""),
     shortDescription: { text: ruleName(code) },
+    helpUri: findingDocsUrl(code),
     defaultConfiguration: { level: levelFor(defaultSeverity) },
   };
 }
@@ -113,7 +116,7 @@ export function renderSarifReport(report: RouteLintReport): string {
           driver: {
             name: "Site check",
             semanticVersion: report.toolVersion,
-            informationUri: "https://nikom.work",
+            informationUri: "https://nikocodes.com/software/routelint/",
             rules: codes.map((code) => ruleFor(code, findings)),
           },
         },

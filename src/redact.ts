@@ -19,6 +19,8 @@ import type {
   RouteSource,
   SitemapEntry,
   SitemapInventory,
+  SocialSignal,
+  StructuredDataSignal,
 } from "./types.js";
 import { redactErrorText, redactUrlReference } from "./url.js";
 
@@ -67,6 +69,30 @@ function hreflang(signal: HreflangSignal, secrets: readonly string[]): HreflangS
   };
 }
 
+function social(signal: SocialSignal, secrets: readonly string[]): SocialSignal {
+  const isUrl =
+    /^(?:og:(?:url|image|video|audio)(?::(?:url|secure_url))?|twitter:(?:url|image(?::src)?|player(?::stream)?))$/u.test(
+      signal.property,
+    );
+  return {
+    ...signal,
+    property: text(signal.property, secrets),
+    value: isUrl ? reference(signal.value, secrets) : text(signal.value, secrets),
+  };
+}
+
+function structuredData(
+  signal: StructuredDataSignal,
+  secrets: readonly string[],
+): StructuredDataSignal {
+  return {
+    ...signal,
+    types: signal.types.map((type) => text(type, secrets)),
+    ids: signal.ids.map((id) => reference(id, secrets)),
+    ...(signal.error === undefined ? {} : { error: text(signal.error, secrets) }),
+  };
+}
+
 function signals(value: PageSignals, secrets: readonly string[]): PageSignals {
   return {
     titles: value.titles.map((signal) => metadata(signal, secrets)),
@@ -79,6 +105,14 @@ function signals(value: PageSignals, secrets: readonly string[]): PageSignals {
     h1s: value.h1s.map((signal) => metadata(signal, secrets)),
     links: value.links.map((signal) => link(signal, secrets)),
     hreflangs: value.hreflangs.map((signal) => hreflang(signal, secrets)),
+    ...(value.social === undefined
+      ? {}
+      : { social: value.social.map((signal) => social(signal, secrets)) }),
+    ...(value.structuredData === undefined
+      ? {}
+      : {
+          structuredData: value.structuredData.map((signal) => structuredData(signal, secrets)),
+        }),
     ...(value.htmlLang === undefined ? {} : { htmlLang: text(value.htmlLang, secrets) }),
     ...(value.baseHref === undefined ? {} : { baseHref: reference(value.baseHref, secrets) }),
   };
@@ -303,7 +337,11 @@ function finding(value: Finding, secrets: readonly string[]): Finding {
           evidence: Object.fromEntries(
             Object.entries(value.evidence).map(([name, evidenceValue]) => [
               text(name, secrets),
-              typeof evidenceValue === "string" ? text(evidenceValue, secrets) : evidenceValue,
+              typeof evidenceValue === "string"
+                ? value.code === "conflicting-json-ld-id" && name === "id"
+                  ? reference(evidenceValue, secrets)
+                  : text(evidenceValue, secrets)
+                : evidenceValue,
             ]),
           ),
         }),

@@ -87,6 +87,7 @@ export {
   renderTerminalReport,
   stableJson,
 } from "./reporters/index.js";
+export { findingDocsUrl } from "./rules.js";
 export { runRouteLint } from "./run.js";
 export type {
   AgentProfile,
@@ -145,6 +146,8 @@ export type {
   Severity,
   SitemapEntry,
   SitemapInventory,
+  SocialSignal,
+  StructuredDataSignal,
 } from "./types.js";
 export { isSameOrigin, isUrlIncluded, normalizeUrl, redactErrorText, redactUrl } from "./url.js";
 export { REPORT_SCHEMA_VERSION, VERSION } from "./version.js";

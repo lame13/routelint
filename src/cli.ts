@@ -15,7 +15,9 @@ import {
   parseHeaderOptions,
 } from "./config.js";
 import { diffReports, readRouteLintReport, renderDiffJson, renderDiffTerminal } from "./diff.js";
+import { findRuleExplanation, formatRuleExplanation, readRuleDocs } from "./explain.js";
 import { renderReport } from "./reporters/index.js";
+import { RULE_DOCS_URL } from "./rules.js";
 import { runRouteLint } from "./run.js";
 import type { ReportFormat, Severity } from "./types.js";
 import { VERSION } from "./version.js";
@@ -220,7 +222,7 @@ export function createProgram(): Command {
   const program = new Command()
     .name("routelint")
     .description(
-      "Lint SSR routes, links, canonicals, sitemaps, hreflang, redirects, and indexability.",
+      "Lint SSR routes, structured data, links, canonicals, sitemaps, hreflang, redirects, and indexability.",
     )
     .version(VERSION)
     .showHelpAfterError();
@@ -290,6 +292,18 @@ export function createProgram(): Command {
         }
       },
     );
+
+  program
+    .command("explain")
+    .description("explain a finding code using the bundled rule reference")
+    .argument("<code>", "finding code such as missing-title")
+    .action(async (code: string) => {
+      const explanation = findRuleExplanation(code, await readRuleDocs());
+      if (explanation === undefined) {
+        throw new Error(`Unknown finding code: ${code}. See ${RULE_DOCS_URL}.`);
+      }
+      process.stdout.write(formatRuleExplanation(explanation));
+    });
 
   program
     .command("init")

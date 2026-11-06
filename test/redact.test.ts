@@ -121,6 +121,24 @@ describe("report redaction", () => {
                   },
                 ],
                 hreflangs: [],
+                social: [
+                  { property: "og:title", value: `Welcome ${secret}`, location: "head" },
+                  { property: "og:image", value: "/share?token=image-secret", location: "head" },
+                  {
+                    property: "twitter:image",
+                    value: "//example.com/share?token=twitter-secret",
+                    location: "head",
+                  },
+                ],
+                structuredData: [
+                  {
+                    types: ["Thing"],
+                    ids: [`https://example.com/?auth=${secret}`, "/thing?token=id-secret"],
+                    sha256: "a".repeat(64),
+                    context: "schema.org",
+                    valid: true,
+                  },
+                ],
               },
               bytesRead: 1,
               durationMs: 1,
@@ -138,6 +156,13 @@ describe("report redaction", () => {
           message: `The response reflected ${secret}`,
           url,
           evidence: { reflected: secret },
+        },
+        {
+          code: "conflicting-json-ld-id",
+          severity: "warning",
+          message: "The route declares different JSON-LD for the same @id.",
+          url,
+          evidence: { id: "/thing?token=finding-secret", firstBlock: 1, block: 2 },
         },
       ],
       summary: {
@@ -173,6 +198,11 @@ describe("report redaction", () => {
     expect(serialized).not.toContain("/Users/niko/private-site");
     expect(safe.build).toMatchObject({ root: ".", buildDirectory: ".next" });
     expect(safe.robots?.availability).toEqual({ state: "unavailable", reason: "http-error" });
+    expect(safe.routes[0]?.snapshots[0]?.signals.social?.[0]?.value).not.toContain(secret);
+    expect(safe.routes[0]?.snapshots[0]?.signals.structuredData?.[0]?.ids[0]).not.toContain(secret);
+    for (const value of ["image-secret", "twitter-secret", "id-secret", "finding-secret"]) {
+      expect(serialized).not.toContain(value);
+    }
     expect(serialized).toContain("%5Bredacted%5D");
     expect(JSON.stringify(report)).toContain(secret);
   });

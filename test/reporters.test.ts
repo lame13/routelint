@@ -230,6 +230,7 @@ describe("SARIF reporter", () => {
       "CANONICAL_MISSING",
       "LINK_BROKEN",
     ]);
+    expect(parsed.runs[0].tool.driver.rules[0].helpUri).toContain("docs/RULES.md");
     const broken = parsed.runs[0].results.find(
       (result: { ruleId: string }) => result.ruleId === "LINK_BROKEN",
     );
@@ -295,12 +296,14 @@ describe("HTML reporter", () => {
     expect(output).toContain("https://example.com/old");
     expect(output).toContain("https://example.com/new");
     expect(output).toContain("badge-verified");
+    expect(output).toContain('class="finding-docs"');
+    expect(output).toContain("docs/RULES.md#");
     expect(output).toContain("2 Next.js definitions were outside contract scope");
     expect(output).toContain("No response differences were found between configured agents");
     expect(output).toContain("Rendered evidence");
     expect(output).toContain('label for="route-search"');
     expect(output).toContain("prefers-reduced-motion");
-    expect(output).toContain("https://nikom.work");
+    expect(output).toContain("https://nikocodes.com/software/routelint/");
     expect(output).not.toMatch(/<script[^>]+src=/i);
     expect(output).not.toMatch(/<link\b/i);
     expect(output).not.toMatch(/@(?:import|font-face)/i);

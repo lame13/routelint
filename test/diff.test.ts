@@ -136,6 +136,30 @@ describe("report validation", () => {
     expect(parseRouteLintReport(value)).toBe(value);
   });
 
+  it("accepts schema-v5 rich-metadata evidence and still reads schema-v4 reports", () => {
+    const product = page(
+      "/product",
+      {},
+      {
+        social: [{ property: "og:title", value: "Product", location: "head" }],
+        structuredData: [
+          {
+            types: ["Product"],
+            ids: ["#product"],
+            sha256: "a".repeat(64),
+            context: "schema.org",
+            valid: true,
+          },
+        ],
+      },
+    );
+    const current = { ...report([route("/product", product)]), schemaVersion: "5" };
+    const legacy = { ...report([route("/product")]), schemaVersion: "4" };
+
+    expect(parseRouteLintReport(current)).toBe(current);
+    expect(parseRouteLintReport(legacy)).toBe(legacy);
+  });
+
   it("round-trips complete schema-v2 evidence and comparison metadata", () => {
     const content = {
       characters: 128,
@@ -306,7 +330,7 @@ describe("report validation", () => {
 
   it.each([
     [null, "report"],
-    [{ ...report(), schemaVersion: "5" }, "schemaVersion"],
+    [{ ...report(), schemaVersion: "6" }, "schemaVersion"],
     [
       (() => {
         const { summary: _summary, ...missingSummary } = report();

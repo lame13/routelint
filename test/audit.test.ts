@@ -277,6 +277,100 @@ function codesFor(input: AuditInput, url?: string): string[] {
     .map((finding) => finding.code);
 }
 
+describe("structured data and social metadata", () => {
+  const productBlock = {
+    types: ["Product"],
+    ids: ["#product"],
+    sha256: "a".repeat(64),
+    context: "schema.org",
+    valid: true,
+  } as const;
+
+  it("reports structural JSON-LD problems without storing a payload", () => {
+    const page = snapshot(
+      "/product",
+      {},
+      {
+        structuredData: [
+          productBlock,
+          {
+            types: [],
+            ids: [],
+            sha256: "b".repeat(64),
+            context: "schema.org",
+            valid: false,
+            error: "The JSON-LD block is not valid JSON.",
+          },
+          { types: [], ids: [], sha256: "c".repeat(64), context: "missing", valid: true },
+          productBlock,
+          { ...productBlock, sha256: "d".repeat(64) },
+        ],
+      },
+    );
+
+    const codes = codesFor(auditInput([route("/product", { page })]), "/product");
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        "invalid-json-ld",
+        "json-ld-missing-context",
+        "json-ld-missing-type",
+        "duplicate-json-ld",
+        "conflicting-json-ld-id",
+      ]),
+    );
+    expect(codes.filter((code) => code === "invalid-json-ld")).toHaveLength(1);
+    expect(codes.filter((code) => code === "duplicate-json-ld")).toHaveLength(1);
+  });
+
+  it("keeps Open Graph requirements opt-in", () => {
+    const page = snapshot(
+      "/share",
+      {},
+      {
+        social: [{ property: "og:title", value: "Shareable", location: "head" }],
+      },
+    );
+
+    expect(codesFor(auditInput([route("/share", { page })]), "/share")).not.toContain(
+      "missing-og-description",
+    );
+
+    const required = codesFor(
+      auditInput([route("/share", { page })], {
+        options: { ...quietAudit, requireOpenGraph: true, requireOgImage: true },
+      }),
+      "/share",
+    );
+    expect(required).toEqual(
+      expect.arrayContaining(["missing-og-description", "missing-og-image"]),
+    );
+    expect(required).not.toContain("missing-og-title");
+  });
+
+  it("reports structured data and social metadata that appear only after JavaScript runs", () => {
+    const page = snapshot("/spa", {}, { structuredData: [], social: [] });
+    const app = route("/spa", {
+      page,
+      rendered: {
+        requestedUrl: absolute("/spa"),
+        finalUrl: absolute("/spa"),
+        status: 200,
+        completion: "complete",
+        signals: signals({
+          structuredData: [productBlock],
+          social: [{ property: "og:title", value: "Rendered", location: "head" }],
+        }),
+        htmlBytes: 500,
+        durationMs: 10,
+      },
+    });
+
+    expect(codesFor(auditInput([app]), "/spa")).toEqual(
+      expect.arrayContaining(["rendered-only-json-ld", "rendered-only-og"]),
+    );
+  });
+});
+
 describe("redirect contract integration", () => {
   it("replaces the generic route warning with contract-specific results", () => {
     const redirected = route("/old", {

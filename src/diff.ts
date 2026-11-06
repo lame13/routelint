@@ -68,6 +68,19 @@ const hreflangSignalSchema = z.object({
   href: z.string(),
   resolvedUrl: httpUrlSchema.optional(),
 });
+const socialSignalSchema = z.object({
+  property: z.string().min(1),
+  value: z.string(),
+  location: z.enum(["head", "body"]),
+});
+const structuredDataSignalSchema = z.object({
+  types: z.array(z.string()),
+  ids: z.array(z.string()),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  context: z.enum(["schema.org", "other", "missing"]),
+  valid: z.boolean(),
+  error: z.string().optional(),
+});
 const pageSignalsSchema = z.object({
   titles: z.array(metadataSignalSchema),
   descriptions: z.array(metadataSignalSchema),
@@ -76,6 +89,8 @@ const pageSignalsSchema = z.object({
   h1s: z.array(metadataSignalSchema),
   links: z.array(linkSignalSchema),
   hreflangs: z.array(hreflangSignalSchema),
+  social: z.array(socialSignalSchema).optional(),
+  structuredData: z.array(structuredDataSignalSchema).optional(),
   htmlLang: z.string().optional(),
   baseHref: z.string().optional(),
 });
@@ -290,6 +305,8 @@ const reportAuditSchema = z.object({
   requireCanonical: z.boolean(),
   requireH1: z.boolean(),
   requireSitemapCoverage: z.boolean(),
+  requireOpenGraph: z.boolean().optional(),
+  requireOgImage: z.boolean().optional(),
   maxDepth: nonNegativeIntegerSchema,
   maxResponseMs: z.number().int().positive().optional(),
   maxRedirectHopMs: z.number().int().positive().optional(),
@@ -304,6 +321,8 @@ const reportAuditSchema = z.object({
         requireCanonical: z.boolean().optional(),
         requireH1: z.boolean().optional(),
         requireSitemapCoverage: z.boolean().optional(),
+        requireOpenGraph: z.boolean().optional(),
+        requireOgImage: z.boolean().optional(),
         maxDepth: nonNegativeIntegerSchema.optional(),
         maxResponseMs: z.number().int().positive().optional(),
         maxRedirectHopMs: z.number().int().positive().optional(),
@@ -313,7 +332,7 @@ const reportAuditSchema = z.object({
     .optional(),
 });
 const routeLintReportSchema = z.object({
-  schemaVersion: z.enum(["1", "2", "3", "4"]),
+  schemaVersion: z.enum(["1", "2", "3", "4", "5"]),
   toolVersion: z.string().min(1),
   generatedAt: z.iso.datetime(),
   durationMs: nonNegativeNumberSchema,
