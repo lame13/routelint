@@ -144,7 +144,7 @@ Playwright is optional; a normal RouteLint install does not download a browser. 
 
 ### Check structured data and social tags
 
-Version 0.5.0 checks JSON-LD automatically for unreadable blocks, missing `@context` or `@type`, repeated blocks, and different blocks sharing an `@id`. Reports retain types, IDs, and fingerprints rather than the JSON-LD payload. These are structural checks; they do not validate Schema.org properties or predict rich-result eligibility.
+RouteLint checks JSON-LD automatically for unreadable blocks, missing `@context` or `@type`, repeated blocks, and different blocks sharing an `@id`. Reports retain types, IDs, and fingerprints rather than the JSON-LD payload. These are structural checks; they do not validate Schema.org properties or predict rich-result eligibility.
 
 Open Graph and Twitter card tags are captured automatically. To require Open Graph tags, add this to your config:
 
@@ -354,7 +354,7 @@ const report = await runRouteLint(config);
 process.stdout.write(renderJsonReport(report));
 ```
 
-Version 0.5.0 writes JSON report schema 5; the report reader and diff command also accept schemas 1–4. RouteLint validates saved baselines before comparison. Redirect helpers and their TypeScript types are also exported; `report.redirectContracts` gives you the results from a normal run.
+Version 0.5.1 writes JSON report schema 5; the report reader and diff command also accept schemas 1–4. RouteLint validates saved baselines before comparison. Redirect helpers and their TypeScript types are also exported; `report.redirectContracts` gives you the results from a normal run.
 
 ## Development
 

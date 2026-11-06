@@ -1,6 +1,7 @@
 import { createServer, type RequestListener, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { performance } from "node:perf_hooks";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { crawlSite, isAllowedByRobots } from "../src/crawl.js";
 import { redirectContractCandidates } from "../src/redirects.js";
 import type { AgentProfile, CrawlOptions, RobotsFile } from "../src/types.js";
@@ -23,6 +24,8 @@ const generic: AgentProfile = {
 const servers: Server[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
   await Promise.all(
     servers.splice(0).map(
       (server) =>
@@ -324,16 +327,9 @@ describe("crawlSite", () => {
 
 describe("request pacing", () => {
   it("paces redirect hops and agents without counting queued time as response time", async () => {
-    const starts: number[] = [];
-    const origin = await listen((request, response) => {
-      starts.push(performance.now());
-      if (request.url === "/old") {
-        response.writeHead(301, { location: "/new" }).end();
-      } else {
-        response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
-      }
-    });
-    const result = await crawlSite(
+    const requests = mockTimedRequests();
+    const origin = "https://example.test";
+    const pending = crawlSite(
       crawlOptions(origin, {
         seeds: ["/old"],
         agents: [primary, secondary],
@@ -341,14 +337,21 @@ describe("request pacing", () => {
         timeoutMs: 100,
       }),
     );
-    expect(starts).toHaveLength(4);
-    for (let index = 1; index < starts.length; index += 1) {
-      expect((starts[index] ?? 0) - (starts[index - 1] ?? 0)).toBeGreaterThanOrEqual(125);
-    }
+    await vi.advanceTimersByTimeAsync(500);
+    const result = await pending;
+    expect(requests.map((request) => request.at)).toEqual([0, 150, 300, 450]);
+    expect(requests.map((request) => request.path)).toEqual(["/old", "/old", "/new", "/new"]);
+    expect(requests.map((request) => request.agent)).toEqual([
+      primary.userAgent,
+      secondary.userAgent,
+      primary.userAgent,
+      secondary.userAgent,
+    ]);
+    expect(result.routes[0]?.snapshots).toHaveLength(2);
     for (const snapshot of result.routes[0]?.snapshots ?? []) {
       expect(snapshot.completion).toBe("complete");
-      expect(snapshot.durationMs).toBeLessThan(100);
-      expect(snapshot.redirects[0]?.durationMs).toBeLessThan(100);
+      expect(snapshot.durationMs).toBe(20);
+      expect(snapshot.redirects[0]?.durationMs).toBe(10);
     }
   });
 
@@ -376,27 +379,19 @@ describe("request pacing", () => {
   });
 
   it("spaces request starts by the configured delay", async () => {
-    const starts: number[] = [];
-    const origin = await listen((_request, response) => {
-      starts.push(Date.now());
-      response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
-    });
-
-    const result = await crawlSite(
-      crawlOptions(origin, { seeds: ["/a", "/b", "/c"], delayMs: 60 }),
-    );
+    const requests = mockTimedRequests();
+    const origin = "https://example.test";
+    const pending = crawlSite(crawlOptions(origin, { seeds: ["/a", "/b", "/c"], delayMs: 60 }));
+    await vi.advanceTimersByTimeAsync(200);
+    const result = await pending;
 
     expect(result.pacing).toEqual({ delayMs: 60, clamped: false });
-    expect(starts).toHaveLength(3);
-    expect((starts.at(-1) ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(90);
+    expect(requests.map((request) => request.at)).toEqual([0, 60, 120]);
   });
 
   it("honors a robots.txt crawl delay unless it is explicitly ignored", async () => {
-    const starts: number[] = [];
-    const origin = await listen((_request, response) => {
-      starts.push(Date.now());
-      response.writeHead(200, { "content-type": "text/html" }).end("<h1>Page</h1>");
-    });
+    const requests = mockTimedRequests();
+    const origin = "https://example.test";
     const robots: RobotsFile = {
       url: `${origin}/robots.txt`,
       availability: { state: "available" },
@@ -406,14 +401,16 @@ describe("request pacing", () => {
       crawlDelaySeconds: 0.06,
     };
 
-    const honored = await crawlSite(
+    const pendingHonored = crawlSite(
       crawlOptions(origin, { seeds: ["/a", "/b"], respectRobots: true, robots }),
     );
+    await vi.advanceTimersByTimeAsync(100);
+    const honored = await pendingHonored;
     expect(honored.pacing).toEqual({ delayMs: 60, robotsDelaySeconds: 0.06, clamped: false });
-    expect((starts.at(-1) ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(45);
+    expect(requests.map((request) => request.at)).toEqual([0, 60]);
 
-    starts.length = 0;
-    const ignored = await crawlSite(
+    requests.length = 0;
+    const pendingIgnored = crawlSite(
       crawlOptions(origin, {
         seeds: ["/a", "/b"],
         respectRobots: true,
@@ -421,8 +418,10 @@ describe("request pacing", () => {
         honorCrawlDelay: false,
       }),
     );
+    await vi.advanceTimersByTimeAsync(100);
+    const ignored = await pendingIgnored;
     expect(ignored.pacing).toEqual({ delayMs: 0, clamped: false });
-    expect((starts.at(-1) ?? 0) - (starts[0] ?? 0)).toBeLessThan(45);
+    expect(requests.map((request) => request.at)).toEqual([100, 100]);
   });
 
   it("caps an extreme declared crawl delay and reports the cap", async () => {
@@ -510,6 +509,27 @@ describe("isAllowedByRobots", () => {
     expect(isAllowedByRobots(robots, "https://other.test/private/secret", generic)).toBe(true);
   });
 });
+
+/** Measure request dispatch with a controlled clock, independent of socket/event-loop latency. */
+function mockTimedRequests(): Array<{ at: number; path: string; agent: string | null }> {
+  vi.useFakeTimers({ now: 0, toFake: ["Date", "setTimeout", "clearTimeout"] });
+  vi.spyOn(performance, "now").mockImplementation(() => Date.now());
+  const requests: Array<{ at: number; path: string; agent: string | null }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    requests.push({
+      at: performance.now(),
+      path,
+      agent: new Headers(init?.headers).get("user-agent"),
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    init?.signal?.throwIfAborted();
+    return path === "/old"
+      ? new Response(null, { status: 301, headers: { location: "/new" } })
+      : new Response("<h1>Page</h1>", { headers: { "content-type": "text/html" } });
+  });
+  return requests;
+}
 
 function crawlOptions(origin: string, overrides: Partial<CrawlOptions>): CrawlOptions {
   return {
