@@ -116,7 +116,7 @@ export function renderSarifReport(report: RouteLintReport): string {
           driver: {
             name: "Site check",
             semanticVersion: report.toolVersion,
-            informationUri: "https://nikom.work",
+            informationUri: "https://nikocodes.com/software/routelint/",
             rules: codes.map((code) => ruleFor(code, findings)),
           },
         },

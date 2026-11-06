@@ -303,7 +303,7 @@ describe("HTML reporter", () => {
     expect(output).toContain("Rendered evidence");
     expect(output).toContain('label for="route-search"');
     expect(output).toContain("prefers-reduced-motion");
-    expect(output).toContain("https://nikom.work");
+    expect(output).toContain("https://nikocodes.com/software/routelint/");
     expect(output).not.toMatch(/<script[^>]+src=/i);
     expect(output).not.toMatch(/<link\b/i);
     expect(output).not.toMatch(/@(?:import|font-face)/i);

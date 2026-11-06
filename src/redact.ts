@@ -70,10 +70,14 @@ function hreflang(signal: HreflangSignal, secrets: readonly string[]): HreflangS
 }
 
 function social(signal: SocialSignal, secrets: readonly string[]): SocialSignal {
+  const isUrl =
+    /^(?:og:(?:url|image|video|audio)(?::(?:url|secure_url))?|twitter:(?:url|image(?::src)?|player(?::stream)?))$/u.test(
+      signal.property,
+    );
   return {
     ...signal,
     property: text(signal.property, secrets),
-    value: text(signal.value, secrets),
+    value: isUrl ? reference(signal.value, secrets) : text(signal.value, secrets),
   };
 }
 
@@ -84,7 +88,7 @@ function structuredData(
   return {
     ...signal,
     types: signal.types.map((type) => text(type, secrets)),
-    ids: signal.ids.map((id) => text(id, secrets)),
+    ids: signal.ids.map((id) => reference(id, secrets)),
     ...(signal.error === undefined ? {} : { error: text(signal.error, secrets) }),
   };
 }
@@ -333,7 +337,11 @@ function finding(value: Finding, secrets: readonly string[]): Finding {
           evidence: Object.fromEntries(
             Object.entries(value.evidence).map(([name, evidenceValue]) => [
               text(name, secrets),
-              typeof evidenceValue === "string" ? text(evidenceValue, secrets) : evidenceValue,
+              typeof evidenceValue === "string"
+                ? value.code === "conflicting-json-ld-id" && name === "id"
+                  ? reference(evidenceValue, secrets)
+                  : text(evidenceValue, secrets)
+                : evidenceValue,
             ]),
           ),
         }),

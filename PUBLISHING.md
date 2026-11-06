@@ -38,15 +38,14 @@ git status --short
 If needed, install GitHub CLI with `brew install gh` and sign in with `gh auth login`.
 
 ```bash
-git add README.md CHANGELOG.md PUBLISHING.md package.json package-lock.json \
+git add README.md CHANGELOG.md CODE_OF_CONDUCT.md PUBLISHING.md package.json package-lock.json \
   docs examples scripts src test
 git diff --cached --check
 git diff --cached --stat
-git commit -m "Release RouteLint 0.5.0" \
-  -m "Add structured data and social metadata checks, rendered-only metadata findings, the explain command, finding documentation links, and JSON report schema 5. Verified with npm run check."
+git commit -m "Fix 0.5.0 review findings and update project links"
 git push -u origin release/0.5.0
 gh pr create --base main --head release/0.5.0 --fill
-gh pr checks release/0.5.0 --watch
+gh pr checks release/0.5.0 --watch --fail-fast
 ```
 
 Review the PR and satisfy the branch's required checks and approvals, then merge it:
@@ -112,7 +111,7 @@ NPM_CONFIG_PROVENANCE=false npm publish --access public --tag latest
 After publication succeeds, verify the registry and installed CLI, then clear the regenerated build output and test caches:
 
 ```bash
-npm view routelint@0.5.0 version dist.integrity repository.url engines
+npm view routelint@0.5.0 version dist.integrity repository.url homepage engines
 npm view routelint dist-tags
 npx --yes routelint@0.5.0 --version
 node scripts/clean.mjs
@@ -124,11 +123,17 @@ See npm's [interactive 2FA instructions](https://docs.npmjs.com/accessing-npm-us
 
 ## 4. Tag the published source
 
-From the same merged commit you just published:
+From the same merged commit you just published, first confirm that `v0.5.0` has not already been pushed:
+
+```bash
+git ls-remote --tags origin refs/tags/v0.5.0
+```
+
+This must succeed with no output. If it prints a remote tag, stop and inspect it before proceeding. A local `v0.5.0` tag already exists on the original release commit, so replace that local tag with the tested, merged commit. The push below does not force-update a remote tag:
 
 ```bash
 test -z "$(git status --porcelain)"
-git tag -a v0.5.0 -m "RouteLint v0.5.0"
+git tag -fa v0.5.0 -m "RouteLint v0.5.0"
 git push origin v0.5.0
 release_notes=$(mktemp)
 awk '/^## 0\.5\.0 / { printing=1; next } printing && /^## / { exit } printing { print }' \

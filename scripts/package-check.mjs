@@ -75,6 +75,7 @@ try {
     "dist/index.d.ts",
     "package.json",
     "README.md",
+    "docs/RULES.md",
     "LICENSE",
   ];
   for (const path of required) {
@@ -114,6 +115,13 @@ try {
   for (const command of ["check", "next", "diff", "explain", "init"]) {
     if (!help.stdout.includes(command))
       throw new Error(`Installed CLI help is missing ${command}.`);
+  }
+  const explanation = await run(node, [cli, "explain", "invalid-json-ld"], { cwd: temporary });
+  if (
+    !explanation.stdout.includes("Default severity: warning") ||
+    !explanation.stdout.includes("docs/RULES.md#structured-data-and-social-metadata")
+  ) {
+    throw new Error("Installed CLI could not explain a finding from its bundled rule reference.");
   }
   const configPath = join(temporary, "smoke.config.yml");
   await run(node, [cli, "init", configPath], { cwd: temporary });

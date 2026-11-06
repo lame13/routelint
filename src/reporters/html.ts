@@ -772,7 +772,7 @@ export function renderHtmlReport(report: RouteLintReport): string {
       </dl>
     </section>
   </main>
-  <footer><p>Niko M. · <a href="https://nikom.work" rel="author noopener">nikom.work</a></p></footer>
+  <footer><p>Niko M. · <a href="https://nikocodes.com/software/routelint/" rel="author noopener">RouteLint on nikocodes.com</a></p></footer>
   <script>${SCRIPTS}</script>
 </body>
 </html>

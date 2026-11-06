@@ -71,7 +71,7 @@ A contract source is exempt from the generic `redirected-route` and ordinary pag
 
 Structured-data checks are structural, not a Schema.org validator. RouteLint records block types, `@id` values, a content fingerprint, and structural problems. It never stores the JSON-LD payload in a report and ignores blocks inside inert `<template>` content. It does not claim that a page is eligible for a rich result or validate the required properties for every Schema.org type. Use a dedicated rich-results test for that final check.
 
-Open Graph and Twitter-card requirements are opt-in. `audit.requireOpenGraph` requires `og:title` and `og:description`; `audit.requireOgImage` requires `og:image`:
+Open Graph requirements are opt-in. Twitter card tags are captured as evidence, without a presence requirement. `audit.requireOpenGraph` requires `og:title` and `og:description`; `audit.requireOgImage` requires `og:image`:
 
 ```yaml
 audit:

@@ -197,6 +197,30 @@ describe("parseHtml", () => {
     });
   });
 
+  it("ignores JSON formatting when fingerprinting but preserves whitespace inside strings", () => {
+    const signals = parseHtml(
+      `<script type="application/ld+json">{"@type":"Thing","name":"a  b"}</script>
+       <script type="application/ld+json">{ "@type": "Thing", "name": "a  b" }</script>
+       <script type="application/ld+json">{"@type":"Thing","name":"a b"}</script>`,
+      "https://example.test/",
+    );
+    const blocks = signals.structuredData ?? [];
+    expect(blocks[0]?.sha256).toBe(blocks[1]?.sha256);
+    expect(blocks[0]?.sha256).not.toBe(blocks[2]?.sha256);
+  });
+
+  it("handles large graphs and deeply nested contexts without overflowing the stack", () => {
+    const graph = `{"@graph":[{"@type":"Thing"},${"{},".repeat(150_000)}{}]}`;
+    const context = `{"@type":"Thing","@context":${"[".repeat(10_000)}"https://schema.org"${"]".repeat(10_000)}}`;
+    const signals = parseHtml(
+      `<script type="application/ld+json">${graph}</script>
+       <script type="application/ld+json">${context}</script>`,
+      "https://example.test/",
+    );
+    expect(signals.structuredData?.[0]).toMatchObject({ valid: true, types: ["Thing"] });
+    expect(signals.structuredData?.[1]).toMatchObject({ valid: true, context: "schema.org" });
+  });
+
   it("marks unreadable JSON-LD without retaining its payload or template contents", () => {
     const signals = parseHtml(
       `<head>

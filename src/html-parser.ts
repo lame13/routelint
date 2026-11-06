@@ -252,7 +252,10 @@ function isJsonLdScript(type: string | undefined): boolean {
 }
 
 function structuredDataSignal(source: string): StructuredDataSignal {
-  const normalized = source.replace(/\s+/gu, " ").trim();
+  // Remove formatting whitespace without changing JSON string values.
+  const normalized = source.replace(/"(?:\\.|[^"\\])*"|\s+/gu, (token) =>
+    token.startsWith('"') ? token : "",
+  );
   const sha256 = createHash("sha256").update(normalized).digest("hex");
   if (normalized.length === 0) {
     return invalidStructuredData(sha256, "The JSON-LD block is empty.");
@@ -300,13 +303,18 @@ function structuredDataNodes(
   if (roots.length === 0 || !roots.every(isRecord)) return undefined;
 
   const nodes: Record<string, unknown>[] = [];
-  const queue: unknown[] = [...roots];
+  const queue: unknown[] = roots.slice(0, 500);
   while (queue.length > 0 && nodes.length < 500) {
     const node = queue.shift();
     if (!isRecord(node)) continue;
     nodes.push(node);
     const graph = node["@graph"];
-    if (Array.isArray(graph)) queue.push(...graph);
+    if (Array.isArray(graph)) {
+      for (const child of graph) {
+        if (nodes.length + queue.length >= 500) break;
+        queue.push(child);
+      }
+    }
   }
   return nodes;
 }
@@ -323,13 +331,16 @@ function contextState(value: unknown): StructuredDataSignal["context"] {
 }
 
 function mentionsSchemaOrg(context: unknown): boolean {
-  if (typeof context === "string") {
-    return /(?:^|[./])schema\.org(?:[/#]|$)/i.test(context.trim());
-  }
-  if (Array.isArray(context)) return context.some(mentionsSchemaOrg);
-  if (isRecord(context)) {
-    const vocabulary = context["@vocab"];
-    return typeof vocabulary === "string" && mentionsSchemaOrg(vocabulary);
+  const pending: unknown[] = [context];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value === "string") {
+      if (/(?:^|[./])schema\.org(?:[/#]|$)/i.test(value.trim())) return true;
+    } else if (Array.isArray(value)) {
+      for (const item of value) pending.push(item);
+    } else if (isRecord(value) && typeof value["@vocab"] === "string") {
+      pending.push(value["@vocab"]);
+    }
   }
   return false;
 }

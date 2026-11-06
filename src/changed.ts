@@ -106,7 +106,7 @@ function assertComparable(current: RouteLintReport, baseline: RouteLintReport): 
     ["request header names", current.config.headerNames, baseline.config.headerNames],
     ["URL-list input count", current.config.urlListFiles, baseline.config.urlListFiles],
     ["redirect contracts", current.config.redirects, baseline.config.redirects],
-    ["audit policy", current.config.audit, baseline.config.audit],
+    ["audit policy", comparableAudit(current.config.audit), comparableAudit(baseline.config.audit)],
   ];
   for (const [label, currentValue, baselineValue] of checks) {
     if (stableSerialize(currentValue) !== stableSerialize(baselineValue)) mismatches.push(label);
@@ -116,6 +116,15 @@ function assertComparable(current: RouteLintReport, baseline: RouteLintReport): 
       `Changed-only baseline is not comparable: ${mismatches.join(", ")} ${mismatches.length === 1 ? "differs" : "differ"}.`,
     );
   }
+}
+
+function comparableAudit(audit: RouteLintReport["config"]["audit"]): unknown {
+  if (audit === undefined) return undefined;
+  return {
+    ...audit,
+    requireOpenGraph: audit.requireOpenGraph ?? false,
+    requireOgImage: audit.requireOgImage ?? false,
+  };
 }
 
 /** Serialize JSON-compatible values with deterministic object-key ordering. */

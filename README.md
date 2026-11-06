@@ -2,9 +2,11 @@
 
 [![CI](https://github.com/lame13/routelint/actions/workflows/ci.yml/badge.svg)](https://github.com/lame13/routelint/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/routelint)](https://www.npmjs.com/package/routelint)
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/lame13/routelint/blob/main/LICENSE)
 
-RouteLint is a CLI for finding technical SEO problems in your deployed site. It catches broken links, redirects that land in the wrong place, empty server-rendered pages, and conflicts between your canonicals, sitemaps, and indexing rules.
+[Website](https://nikocodes.com/software/routelint/) · [Finding reference](https://github.com/lame13/routelint/blob/main/docs/RULES.md) · [Changelog](https://github.com/lame13/routelint/blob/main/CHANGELOG.md)
+
+RouteLint is a CLI for finding technical SEO problems in your deployed site. It catches broken links, redirects that land in the wrong place, empty server-rendered pages, malformed JSON-LD, and conflicts between your canonicals, sitemaps, and indexing rules.
 
 Use it after a deploy, during a URL migration, or in CI to catch regressions. Start with a URL:
 
@@ -126,7 +128,7 @@ redirects:
 
 This expects `/old-pricing` to return a `301` and reach `/pricing` in one hop. RouteLint adds both URLs to the crawl and reports a missing redirect, wrong status, wrong destination, or unhealthy target as an error. Extra hops produce a warning. Redirects that match are counted as verified.
 
-Contracts support exact sources, query strings, path patterns such as `/old/*`, and destinations on other origins. Pattern `samples` add concrete sources to check. `routelint next` also checks concrete, unconditional redirects from supported build manifests. See the [redirect guide](docs/REDIRECTS.md) for the supported cases and finding codes.
+Contracts support exact sources, query strings, path patterns such as `/old/*`, and destinations on other origins. Pattern `samples` add concrete sources to check. `routelint next` also checks concrete, unconditional redirects from supported build manifests. See the [redirect guide](https://github.com/lame13/routelint/blob/main/docs/REDIRECTS.md) for the supported cases and finding codes.
 
 ### Compare SSR with the rendered DOM
 
@@ -139,6 +141,27 @@ npx routelint check https://example.com --rendered
 ```
 
 Playwright is optional; a normal RouteLint install does not download a browser. During rendered checks, preview headers are sent only to the audited origin, and service workers are blocked.
+
+### Check structured data and social tags
+
+Version 0.5.0 checks JSON-LD automatically for unreadable blocks, missing `@context` or `@type`, repeated blocks, and different blocks sharing an `@id`. Reports retain types, IDs, and fingerprints rather than the JSON-LD payload. These are structural checks; they do not validate Schema.org properties or predict rich-result eligibility.
+
+Open Graph and Twitter card tags are captured automatically. To require Open Graph tags, add this to your config:
+
+```yaml
+audit:
+  requireOpenGraph: true # Require og:title and og:description
+  requireOgImage: true   # Also require og:image
+```
+
+These requirements are disabled by default and can also be set per path. Twitter tags are captured for evidence; there is no Twitter-card requirement setting. Add `--rendered` to detect when structured data or social metadata is entirely absent from the server response and appears after JavaScript runs.
+
+Explain a finding directly from the installed package:
+
+```bash
+npx routelint explain invalid-json-ld
+npx routelint explain missing-og-title
+```
 
 ## Commands
 
@@ -292,9 +315,9 @@ Set `--fail-on` to `error`, `warning`, `info`, or `none` to choose which finding
 - Exit `1`: at least one finding met the threshold.
 - Exit `2`: configuration, arguments, or the command itself failed.
 
-To check your own site in CI, start with [examples/github-actions.yml](examples/github-actions.yml).
+To check your own site in CI, start with [examples/github-actions.yml](https://github.com/lame13/routelint/blob/main/examples/github-actions.yml).
 
-This repository's CI verifies RouteLint itself: lint, types, tests, builds, and package installation, with jobs on Linux, macOS, and Windows. Releases go through a PR; npm publishing happens interactively from a maintainer's terminal. See [PUBLISHING.md](PUBLISHING.md).
+This repository's CI verifies RouteLint itself: lint, types, tests, builds, and package installation, with jobs on Linux, macOS, and Windows. Releases go through a PR; npm publishing happens interactively from a maintainer's terminal. See [PUBLISHING.md](https://github.com/lame13/routelint/blob/main/PUBLISHING.md).
 
 ## Reading the result honestly
 
@@ -313,7 +336,7 @@ RouteLint checks delivery and technical SEO. It does not:
 - claim that an unobserved dynamic route exists;
 - replace a full authenticated browser test or a search-engine index report.
 
-For details, read the [finding reference](docs/RULES.md), [redirect guide](docs/REDIRECTS.md), [rendered checks](docs/RENDERED.md), [URL-list guide](docs/URL_LISTS.md), or [Next.js discovery notes](docs/NEXT.md).
+For details, read the [finding reference](https://github.com/lame13/routelint/blob/main/docs/RULES.md), [redirect guide](https://github.com/lame13/routelint/blob/main/docs/REDIRECTS.md), [rendered checks](https://github.com/lame13/routelint/blob/main/docs/RENDERED.md), [URL-list guide](https://github.com/lame13/routelint/blob/main/docs/URL_LISTS.md), or [Next.js discovery notes](https://github.com/lame13/routelint/blob/main/docs/NEXT.md).
 
 ## Programmatic API
 
@@ -331,7 +354,7 @@ const report = await runRouteLint(config);
 process.stdout.write(renderJsonReport(report));
 ```
 
-Reports carry a schema version, which RouteLint validates when reading a saved baseline. Redirect helpers and their TypeScript types are also exported; `report.redirectContracts` gives you the results from a normal run.
+Version 0.5.0 writes JSON report schema 5; the report reader and diff command also accept schemas 1–4. RouteLint validates saved baselines before comparison. Redirect helpers and their TypeScript types are also exported; `report.redirectContracts` gives you the results from a normal run.
 
 ## Development
 
@@ -344,4 +367,4 @@ npm run check
 
 ## License
 
-MIT. Built by [Niko M.](https://nikom.work).
+MIT. Built by [Niko M.](https://nikocodes.com/software/routelint/).
