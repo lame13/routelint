@@ -2,6 +2,12 @@
 
 All notable changes are documented here. This project follows semantic versioning.
 
+## 0.5.1 - 2026-11-06
+
+### Fixed
+
+- Make pacing tests deterministic by measuring request dispatch with a controlled clock and HTTP responses. Exact assertions cover configured and robots.txt delays, redirects, multiple agents, and exclusion of queued time from response durations and timeout budgets. Local socket and event-loop latency no longer cause intermittent release-check failures.
+
 ## 0.5.0 - 2026-11-05
 
 ### Added

@@ -186,7 +186,7 @@ describe("runRouteLint", () => {
 
     expect(report).toMatchObject({
       schemaVersion: "5",
-      toolVersion: "0.5.0",
+      toolVersion: "0.5.1",
       baseUrl: `${origin}/`,
       truncated: false,
       config: {
